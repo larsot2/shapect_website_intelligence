@@ -10,6 +10,7 @@ import { EvidenceList } from "./Evidence";
 import { Shot } from "./Shot";
 import { actionLabel, fieldUsageLabel, reviewLabel, reviewTone } from "./labels";
 import { incompleteParts } from "./PartialNotice";
+import { experienceSteps, placementVerdicts } from "@/lib/blueprint/derive";
 
 const capabilityText: Record<string, string> = {
   guided_questions: "Guided questions", scope_summary: "Project summary", style_choices: "Style choices", preference_summary: "Preference summary",
@@ -52,7 +53,7 @@ export function Recommendations() {
 }
 
 function RecommendationCard({ s, index, onReview, onWhy }: { s: ExperienceSuggestion; index: number; onReview: () => void; onWhy: () => void }) {
-  const { asset, page, decisionFor, decide, undo, screenshot } = useAnalysis();
+  const { bp, asset, page, decisionFor, decide, undo, screenshot } = useAnalysis();
   const d = decisionFor("suggestion", s.id);
   const target = s.conversionTargetAssetId ? asset(s.conversionTargetAssetId) : undefined;
   const ActionIcon = s.action === "improve" ? Wrench : Sparkles;
@@ -70,12 +71,14 @@ function RecommendationCard({ s, index, onReview, onWhy }: { s: ExperienceSugges
     );
   }
 
+  const steps = experienceSteps(s, bp);
+  const lead = s.pageContexts.find((c) => screenshot(c.pageId)) ?? s.pageContexts[0];
   return (
     <article
       data-testid={`card-${s.id}`}
-      className={`grid overflow-hidden rounded-2xl border bg-paper lg:grid-cols-[1fr_380px] ${index === 0 ? "border-ink/15 shadow-[0_18px_50px_-30px_rgba(18,26,31,.4)]" : "border-line"}`}
+      className={`grid overflow-hidden rounded-2xl border bg-paper lg:grid-cols-[1fr_280px] ${index === 0 ? "border-ink/15 shadow-[0_18px_50px_-30px_rgba(18,26,31,.4)]" : "border-line"}`}
     >
-      <div className="flex flex-col p-6 sm:p-8">
+      <div className="flex flex-col p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-2">
           <Chip tone={s.action === "improve" ? "sky" : "go"}>
             <ActionIcon className="size-3" aria-hidden /> {actionLabel[s.action]}
@@ -83,14 +86,32 @@ function RecommendationCard({ s, index, onReview, onWhy }: { s: ExperienceSugges
           {s.confidence < 0.6 && <Chip tone="amber">Optional idea</Chip>}
           {d && <Chip tone={reviewTone[d.status]}>{reviewLabel[d.status]}</Chip>}
         </div>
-        <h3 className="mt-4 text-[22px] font-semibold tracking-tight">{s.label}</h3>
-        <p className="mt-2 max-w-[560px] text-[16px] leading-relaxed text-ink-soft">{s.headline}</p>
+        <h3 className="mt-3 text-[20px] font-semibold tracking-tight">{s.label}</h3>
+        <p className="mt-1 max-w-[620px] text-[15px] leading-relaxed text-ink-soft">{s.headline}</p>
 
-        <div className="mt-6 flex flex-wrap items-center gap-2 text-[13px]">
+        {/* proposed experience — a conceptual visitor flow, not a generated experience */}
+        <div className="mt-4">
+          <p className="text-[11px] font-semibold tracking-wide text-ink-mute uppercase">Proposed experience</p>
+          <ol className={`mt-2 grid gap-2 ${steps.length >= 4 ? "sm:grid-cols-4" : steps.length === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+            {steps.map((st, i) => (
+              <li key={i} className={`rounded-xl px-3 py-2.5 ${i === steps.length - 1 ? "bg-go-soft/60 ring-1 ring-go/20" : "bg-canvas ring-1 ring-line"}`}>
+                <p className="flex items-center gap-1.5 text-[13px] font-semibold">
+                  <span className={`grid size-5 shrink-0 place-items-center rounded-full text-[11px] ${i === steps.length - 1 ? "bg-go text-white" : "bg-paper text-ink-soft ring-1 ring-line"}`}>{i + 1}</span>
+                  {st.title}
+                </p>
+                <p className="mt-1 text-[12px] leading-snug text-ink-soft">{st.detail}</p>
+              </li>
+            ))}
+          </ol>
+          <p className="mt-1.5 text-[11px] text-ink-mute">Concept flow — nothing is generated or activated.</p>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-1.5 text-[12px]">
           <span className="text-ink-mute">On</span>
-          {s.pageContexts.map((c) => (
+          {s.pageContexts.slice(0, 4).map((c) => (
             <span key={c.pageId} className="rounded-md bg-canvas px-2 py-0.5 font-medium text-ink-soft">{page(c.pageId)?.title}</span>
           ))}
+          {s.pageContexts.length > 4 && <span className="text-ink-mute">+{s.pageContexts.length - 4}</span>}
           {target && (
             <>
               <ArrowRight className="size-3.5 text-ink-mute" aria-label="leads to" />
@@ -99,7 +120,7 @@ function RecommendationCard({ s, index, onReview, onWhy }: { s: ExperienceSugges
           )}
         </div>
 
-        <div className="mt-auto flex flex-wrap gap-2 pt-7">
+        <div className="mt-5 flex flex-wrap gap-2">
           <Button variant="primary" onClick={onReview}>Review suggestion</Button>
           <Button variant="secondary" onClick={onWhy}>
             <CircleHelp className="size-4" aria-hidden /> See why
@@ -110,44 +131,26 @@ function RecommendationCard({ s, index, onReview, onWhy }: { s: ExperienceSugges
         </div>
       </div>
 
-      <div className="relative border-t border-line bg-canvas/70 p-5 lg:border-t-0 lg:border-l">
-        {(() => {
-          const withShot = s.pageContexts.filter((c) => screenshot(c.pageId));
-          const shown = withShot.slice(0, 2);
-          const rest = s.pageContexts.filter((c) => !shown.includes(c));
-          return (
-            <>
-              {shown.length > 0 ? (
-                <div className="grid grid-cols-2 gap-3">
-                  {shown.map((c) => (
-                    <figure key={c.pageId} className={shown.length === 1 ? "col-span-2" : ""}>
-                      <Shot pageId={c.pageId} className={`${shown.length === 1 ? "aspect-[16/10]" : "aspect-[4/5]"} rounded-lg border border-line shadow-sm`} />
-                      <figcaption className="mt-2 line-clamp-2 text-[12px] leading-snug text-ink-soft">“{editedText(d, `pageContext.${c.pageId}.startingHook`, c.startingHook)}”</figcaption>
-                    </figure>
-                  ))}
-                </div>
-              ) : null}
-              {rest.length > 0 && (
-                <ul className={`space-y-1.5 ${shown.length ? "mt-3" : ""}`}>
-                  {rest.slice(0, shown.length ? 3 : 5).map((c) => (
-                    <li key={c.pageId} className="rounded-lg bg-paper px-3 py-2 text-[12px] ring-1 ring-line">
-                      <span className="font-medium text-ink">{page(c.pageId)?.title}</span>
-                      <span className="block truncate text-ink-mute">“{editedText(d, `pageContext.${c.pageId}.startingHook`, c.startingHook)}”</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {s.pageContexts.length > 1 && <p className="mt-2 text-[12px] text-ink-mute">One experience on {s.pageContexts.length} pages, framed for each.</p>}
-            </>
-          );
-        })()}
+      <div className="border-t border-line bg-canvas/70 p-4 lg:border-t-0 lg:border-l">
+        {lead && screenshot(lead.pageId) ? (
+          <figure>
+            <Shot pageId={lead.pageId} className="aspect-[4/3] rounded-lg border border-line shadow-sm" />
+            <figcaption className="mt-2 text-[12px] leading-snug text-ink-soft">
+              <span className="font-medium text-ink">{page(lead.pageId)?.title}:</span> “{editedText(d, `pageContext.${lead.pageId}.startingHook`, lead.startingHook)}”
+            </figcaption>
+          </figure>
+        ) : (
+          <p className="text-[12px] text-ink-soft">“{lead ? editedText(d, `pageContext.${lead.pageId}.startingHook`, lead.startingHook) : ""}”</p>
+        )}
+        {s.pageContexts.length > 1 && <p className="mt-2 text-[11px] text-ink-mute">Same experience on {s.pageContexts.length} pages, each with its own opening line.</p>}
       </div>
     </article>
   );
 }
 
 function ReviewDrawer({ s, onClose, onWhy }: { s: ExperienceSuggestion; onClose: () => void; onWhy: () => void }) {
-  const { page, asset, decisionFor, decide, undo, base } = useAnalysis();
+  const { bp, page, asset, decisionFor, decide, undo, base } = useAnalysis();
+  const verdicts = placementVerdicts(bp);
   const d = decisionFor("suggestion", s.id);
   const originals: Record<string, string> = Object.fromEntries([
     ...s.pageContexts.map((c) => [`pageContext.${c.pageId}.startingHook`, c.startingHook]),
@@ -227,6 +230,19 @@ function ReviewDrawer({ s, onClose, onWhy }: { s: ExperienceSuggestion; onClose:
         </div>
 
         <section>
+          <h3 className="text-sm font-semibold">How it could work for a visitor</h3>
+          <ol className="mt-2 space-y-2">
+            {experienceSteps(s, bp).map((st, i) => (
+              <li key={i} className="flex gap-3 text-[14px]">
+                <span className="grid size-6 shrink-0 place-items-center rounded-full bg-go-soft text-[12px] font-semibold text-go-ink">{i + 1}</span>
+                <span><span className="font-medium">{st.title}</span><span className="block text-[13px] text-ink-soft">{st.detail}</span></span>
+              </li>
+            ))}
+          </ol>
+          <p className="mt-2 text-[12px] text-ink-mute">A concept for discussion — no experience has been generated or activated.</p>
+        </section>
+
+        <section>
           <h3 className="text-sm font-semibold">How it could start on each page</h3>
           <p className="mt-0.5 text-[13px] text-ink-mute">One experience, framed for the page it&apos;s on. You can reword the opening line.</p>
           <div className="mt-3 space-y-3">
@@ -246,14 +262,21 @@ function ReviewDrawer({ s, onClose, onWhy }: { s: ExperienceSuggestion; onClose:
               <div key={t.id} className="rounded-xl border border-line p-3">
                 <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px]">
                   <span className="font-medium">{page(t.pageId)?.title}</span>
-                  {t.positionVerified ? (
+                  {t.positionVerified && verdicts.get(t.id)?.quality !== "review" ? (
                     <Link href={`${base}/preview?page=${t.pageId}&marker=${t.id}`} className="ml-auto inline-flex items-center gap-1 font-medium text-go hover:underline">
                       <Eye className="size-3.5" aria-hidden /> See on page
+                    </Link>
+                  ) : t.positionVerified ? (
+                    <Link href={`${base}/preview?page=${t.pageId}`} className="ml-auto inline-flex items-center gap-1 font-medium text-amber hover:underline">
+                      <Eye className="size-3.5" aria-hidden /> Check spot
                     </Link>
                   ) : (
                     <span className="ml-auto text-ink-mute">Suggested section, exact position not verified</span>
                   )}
                 </div>
+                {verdicts.get(t.id) && verdicts.get(t.id)!.quality !== "unverified" && (
+                  <p className={`mb-2 text-[12px] ${verdicts.get(t.id)!.quality === "good" ? "text-go-ink" : "text-amber"}`}>{verdicts.get(t.id)!.note}</p>
+                )}
                 {field(`touchpoint.${t.id}.headline`, "Headline")}
               </div>
             ))}

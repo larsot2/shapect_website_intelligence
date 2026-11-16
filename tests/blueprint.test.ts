@@ -75,3 +75,36 @@ describe("review state", () => {
     expect(JSON.stringify(bp)).toBe(before);
   });
 });
+
+describe("derived views (no LLM needed)", async () => {
+  const { experienceSteps, connectionState, placementVerdicts, stepBasis } = await import("@/lib/blueprint/derive");
+  const bp = fixture as unknown as Blueprint;
+
+  it("builds a concept flow that ends in the existing process", () => {
+    const steps = experienceSteps(bp.suggestedExperiences[0], bp);
+    expect(steps.length).toBeGreaterThanOrEqual(2);
+    expect(steps.at(-1)!.title).toMatch(/consultation request form/i);
+  });
+
+  it("separates bridge vs hand-over and marks preferences", () => {
+    const bridge = connectionState(bp.suggestedConnections.find((c) => c.to.kind === "suggestion")!, bp);
+    expect(bridge.mechanism).toBe("bridge");
+    expect(bridge.carry.find((x) => /style/i.test(x.label))?.note).toBe("preference only");
+    expect(bridge.constraints.join(" ")).toMatch(/not a product selection/);
+    expect(connectionState(bp.suggestedConnections.find((c) => c.to.kind === "existing_asset")!, bp).mechanism).toBe("destination");
+  });
+
+  it("flags two suggestions in the same spot instead of stacking them", () => {
+    const clone = structuredClone(bp);
+    const a = clone.suggestedExperiences[0].touchpoints[0];
+    clone.suggestedExperiences[2].touchpoints[0] = { ...clone.suggestedExperiences[2].touchpoints[0], pageId: a.pageId, bboxes: a.bboxes };
+    const v = placementVerdicts(clone);
+    expect(v.get(clone.suggestedExperiences[2].touchpoints[0].id)?.crowdedBy).toBe(clone.suggestedExperiences[0].label);
+    expect(v.get("tp-home-hero")?.quality).toBe("unverified");
+  });
+
+  it("treats internal outcomes as inferred unless stated", () => {
+    expect(stepBasis({ id: "s1", label: "Call-back", kind: "outcome", pageIds: [] })).toBe("inferred");
+    expect(stepBasis({ id: "s2", label: "Form", kind: "asset", pageIds: [], assetId: "x" })).toBe("observed");
+  });
+});

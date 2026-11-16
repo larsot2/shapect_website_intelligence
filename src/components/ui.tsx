@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, X } from "lucide-react";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "quiet-danger";
 
@@ -106,5 +106,35 @@ export function Drawer({ open, onClose, title, subtitle, children, footer }: {
         {footer && <div className="border-t border-line bg-canvas/60 px-6 py-4">{footer}</div>}
       </div>
     </div>
+  );
+}
+
+/** Collapsible section for deeper facts and evidence (keeps the main view short). */
+export function Disclosure({ id, title, summary, badge, children, defaultOpen = false }: {
+  id?: string;
+  title: string;
+  summary?: React.ReactNode;
+  badge?: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => {
+    // open when someone deep-links to this section
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading location.hash is client-only
+    if (id && typeof window !== "undefined" && window.location.hash === `#${id}`) setOpen(true);
+  }, [id]);
+  return (
+    <section id={id} className="scroll-mt-24 rounded-2xl border border-line bg-paper">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full items-center gap-4 px-5 py-4 text-left sm:px-6">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[17px] font-semibold tracking-tight">{title}</h2>
+          {summary && <p className="mt-0.5 truncate text-[13px] text-ink-mute">{summary}</p>}
+        </div>
+        {badge}
+        <ChevronDown className={`size-5 shrink-0 text-ink-mute transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
+      </button>
+      {open && <div className="border-t border-line bg-canvas/40 px-4 py-5 sm:px-6">{children}</div>}
+    </section>
   );
 }

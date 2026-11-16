@@ -41,6 +41,7 @@ try {
   await shot(page, "01-results");
 
   const planner = page.getByTestId("card-sx-project-planner");
+  assert(await planner.getByText("Proposed experience").isVisible(), "recommendation shows a proposed experience flow");
   await planner.getByRole("button", { name: "See why" }).click();
   assert(await page.getByRole("dialog").getByText("Seen on your website").isVisible(), "why panel shows evidence");
   await shot(page, "02-why");
@@ -58,6 +59,7 @@ try {
   await style.getByRole("button", { name: "Not for us" }).click();
   assert(await style.getByText("marked as not for you").isVisible(), "reject collapses card");
 
+  await page.getByRole("button", { name: /Is this right about your business/ }).click();
   await page.getByTestId("claim-c-region").getByRole("button", { name: "Confirm" }).click();
   await page.getByTestId("connection-cn-planner-to-form").getByRole("button", { name: "Keep" }).click();
   assert(await page.getByTestId("connection-cn-planner-to-form").getByText("Kept in plan").isVisible(), "connection kept (concept only)");
@@ -67,6 +69,7 @@ try {
   await page.reload();
   assert(await visible(page.getByTestId("card-sx-project-planner").getByText("Confirmed with your edits")), "decision survives reload");
   assert(await visible(page.getByTestId("card-sx-style-explorer").getByText("marked as not for you")), "rejection survives reload");
+  await page.getByRole("button", { name: /Is this right about your business/ }).click();
   assert(await visible(page.getByTestId("claim-c-region").getByText("Confirmed by you")), "claim decision survives reload");
 
   await page.goto(`${BASE}/studio/website/fixture-northwind/preview?page=small&marker=tp-small-midpage`);

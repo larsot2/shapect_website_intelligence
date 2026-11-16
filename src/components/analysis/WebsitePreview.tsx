@@ -10,6 +10,7 @@ import { Button, Chip } from "@/components/ui";
 import { editedText, useAnalysis } from "./AnalysisContext";
 import { Shot } from "./Shot";
 import { assetKindLabel, proposalLabel, reviewLabel, reviewTone } from "./labels";
+import { placementVerdicts, type PlacementVerdict } from "@/lib/blueprint/derive";
 
 type Marker =
   | { kind: "asset"; key: string; assetId: string; placement: string; bbox: BBox; n: number; action?: AssetAction }
@@ -36,6 +37,8 @@ export function WebsitePreview() {
     router.replace(`${pathname}?${sp.toString()}`, { scroll: false });
   };
 
+  const rejected = new Set(bp.suggestedExperiences.filter((x) => decisionFor("suggestion", x.id)?.status === "rejected").map((x) => x.id));
+  const verdicts = placementVerdicts(bp, rejected);
   const markers: Marker[] = (() => {
     if (!pageId) return [];
     const out: Marker[] = [];
@@ -46,6 +49,7 @@ export function WebsitePreview() {
       const occs = [...a.occurrences].sort((x, y) => (["main", "hero"].includes(x.placement) ? -1 : 0) - (["main", "hero"].includes(y.placement) ? -1 : 0));
       for (const o of occs) {
         if (o.pageId !== pageId) continue;
+        if (o.placement === "nav") continue; // menu links aren't decision points — and hidden menus measure badly
         const bbox = o.bboxes.find((b) => b.viewport === vp);
         if (!bbox) continue;
         // keep overlays calm: phone/email once per page, other assets at most twice
@@ -60,9 +64,9 @@ export function WebsitePreview() {
         if (t.pageId !== pageId) continue;
         const bbox = t.bboxes.find((b) => b.viewport === vp);
         if (!bbox) continue;
-        // several suggestions can share one section: stack their labels instead of overlapping
-        const same = out.filter((m) => m.kind === "touchpoint" && Math.abs(m.bbox.x - bbox.x) < 24 && Math.abs(m.bbox.y - bbox.y) < 24 && Math.abs(m.bbox.width - bbox.width) < 40).length;
-        out.push({ kind: "touchpoint", key: t.id, suggestionId: s.id, touchpointId: t.id, bbox, stack: same });
+        // one experience per spot: a suggestion that clashes with another is listed, not drawn on top
+        if (verdicts.get(t.id)?.crowdedBy) continue;
+        out.push({ kind: "touchpoint", key: t.id, suggestionId: s.id, touchpointId: t.id, bbox, stack: 0 });
       }
     }
     return out;
@@ -70,7 +74,7 @@ export function WebsitePreview() {
 
   const unverified = bp.suggestedExperiences.flatMap((s) =>
     decisionFor("suggestion", s.id)?.status === "rejected" ? [] :
-    s.touchpoints.filter((t) => t.pageId === pageId && !t.bboxes.some((b) => b.viewport === vp)).map((t) => ({ s, t })),
+    s.touchpoints.filter((t) => t.pageId === pageId && (!t.bboxes.some((b) => b.viewport === vp) || verdicts.get(t.id)?.crowdedBy)).map((t) => ({ s, t, verdict: verdicts.get(t.id) })),
   );
   const selected = markers.find((m) => m.key === selectedKey);
   const shot = pageId ? screenshot(pageId, vp) : undefined;
@@ -136,7 +140,7 @@ export function WebsitePreview() {
             <div ref={stage} className="relative" style={{ aspectRatio: `${shot.width} / ${shot.height}` }}>
               <Image src={shot.src} alt={`Screenshot of ${page(pageId)?.title} (${vp})`} fill sizes="(min-width: 1024px) 800px, 100vw" unoptimized={shot.src.startsWith("/api/")} className="object-cover object-top" priority />
               {markers.map((m) => (
-                <MarkerBox key={m.key} m={m} w={shot.width} h={shot.height} selected={m.key === selectedKey}
+                <MarkerBox key={m.key} m={m} w={shot.width} h={shot.height} selected={m.key === selectedKey} review={m.kind === "touchpoint" && verdicts.get(m.touchpointId)?.quality === "review"}
                   onSelect={() => setParams({ marker: m.key === selectedKey ? null : m.key })} />
               ))}
             </div>
@@ -146,7 +150,7 @@ export function WebsitePreview() {
         {/* context panel */}
         <aside className="lg:sticky lg:top-20 lg:self-start" aria-live="polite">
           {selected ? (
-            <MarkerPanel m={selected} onClose={() => setParams({ marker: null })} />
+            <MarkerPanel m={selected} verdict={selected.kind === "touchpoint" ? verdicts.get(selected.touchpointId) : undefined} onClose={() => setParams({ marker: null })} />
           ) : (
             <PageSummary markers={markers} unverified={unverified} onSelect={(k) => setParams({ marker: k })} />
           )}
@@ -156,7 +160,7 @@ export function WebsitePreview() {
   );
 }
 
-function MarkerBox({ m, w, h, selected, onSelect }: { m: Marker; w: number; h: number; selected: boolean; onSelect: () => void }) {
+function MarkerBox({ m, w, h, selected, onSelect, review }: { m: Marker; w: number; h: number; selected: boolean; onSelect: () => void; review?: boolean }) {
   const { asset, suggestion, decisionFor } = useAnalysis();
   const pad = 6;
   const style = {
@@ -181,8 +185,8 @@ function MarkerBox({ m, w, h, selected, onSelect }: { m: Marker; w: number; h: n
   return (
     <button type="button" data-marker={m.key} onClick={onSelect} style={style} aria-pressed={selected}
       aria-label={`Suggested: ${s.label}`}
-      className={`absolute z-0 rounded-xl border-2 border-dashed transition-colors ${selected ? "border-go bg-go/15" : m.stack > 0 ? "border-transparent bg-transparent" : "border-go/70 bg-go/[.06] hover:bg-go/10"}`}>
-      <span style={{ top: `${-12 - m.stack * 26}px` }} className="absolute left-3 inline-flex max-w-[calc(100%-24px)] items-center gap-1 truncate rounded-full bg-go px-2.5 py-0.5 text-[11px] font-medium text-white shadow">
+      className={`absolute z-0 rounded-xl border-2 border-dashed transition-colors ${selected ? (review ? "border-amber bg-amber/15" : "border-go bg-go/15") : review ? "border-amber/70 bg-amber/[.06] hover:bg-amber/10" : "border-go/70 bg-go/[.06] hover:bg-go/10"}`}>
+      <span className={`absolute -top-3 left-3 inline-flex max-w-[calc(100%-24px)] items-center gap-1 truncate rounded-full px-2.5 py-0.5 text-[11px] font-medium text-white shadow ${review ? "bg-amber" : "bg-go"}`}>
         <Sparkles className="size-3 shrink-0" aria-hidden />
         <span className="truncate">{editedText(d, `touchpoint.${t.id}.headline`, t.headline)}</span>
       </span>
@@ -192,7 +196,7 @@ function MarkerBox({ m, w, h, selected, onSelect }: { m: Marker; w: number; h: n
 
 function PageSummary({ markers, unverified, onSelect }: {
   markers: Marker[];
-  unverified: { s: { id: string; label: string }; t: { id: string; headline: string } }[];
+  unverified: { s: { id: string; label: string }; t: { id: string; headline: string }; verdict?: PlacementVerdict }[];
   onSelect: (key: string) => void;
 }) {
   const { asset, suggestion } = useAnalysis();
@@ -230,9 +234,14 @@ function PageSummary({ markers, unverified, onSelect }: {
       </div>
       {unverified.length > 0 && (
         <div className="rounded-2xl border border-dashed border-line bg-paper/60 p-5 text-[13px]">
-          <p className="font-medium">Suggested section, exact position not verified</p>
-          <ul className="mt-2 space-y-1 text-ink-soft">
-            {unverified.map(({ s, t }) => <li key={t.id}>{s.label}: “{t.headline}”</li>)}
+          <p className="font-medium">Not placed on this screenshot</p>
+          <ul className="mt-2 space-y-2 text-ink-soft">
+            {unverified.map(({ s, t, verdict }) => (
+              <li key={t.id}>
+                <span className="font-medium text-ink">{s.label}</span>: “{t.headline}”
+                <span className="block text-[12px] text-amber">{verdict?.crowdedBy ? verdict.note : "Suggested section — exact position not verified."}</span>
+              </li>
+            ))}
           </ul>
         </div>
       )}
@@ -241,10 +250,10 @@ function PageSummary({ markers, unverified, onSelect }: {
   );
 }
 
-function MarkerPanel({ m, onClose }: { m: Marker; onClose: () => void }) {
+function MarkerPanel({ m, verdict, onClose }: { m: Marker; verdict?: PlacementVerdict; onClose: () => void }) {
   return (
     <div className="animate-fade rounded-2xl border border-line bg-paper p-5 shadow-sm">
-      {m.kind === "asset" ? <AssetDetail m={m} /> : <TouchpointDetail m={m} />}
+      {m.kind === "asset" ? <AssetDetail m={m} /> : <TouchpointDetail m={m} verdict={verdict} />}
       <button type="button" onClick={onClose} className="mt-4 text-[13px] text-ink-mute hover:text-ink">← All markers on this page</button>
     </div>
   );
@@ -305,7 +314,7 @@ function AssetDetail({ m }: { m: Extract<Marker, { kind: "asset" }> }) {
   );
 }
 
-function TouchpointDetail({ m }: { m: Extract<Marker, { kind: "touchpoint" }> }) {
+function TouchpointDetail({ m, verdict }: { m: Extract<Marker, { kind: "touchpoint" }>; verdict?: PlacementVerdict }) {
   const { suggestion, asset, decisionFor, decide, undo } = useAnalysis();
   const s = suggestion(m.suggestionId)!;
   const t = s.touchpoints.find((x) => x.id === m.touchpointId)!;
@@ -335,8 +344,16 @@ function TouchpointDetail({ m }: { m: Extract<Marker, { kind: "touchpoint" }> })
           <input value={text} maxLength={140} onChange={(e) => setText(e.target.value)}
             className="mt-1 w-full rounded-lg border border-line px-3 py-1.5 text-[14px] outline-none focus:border-go" />
         </label>
-        <p className="mt-1 text-[12px] text-ink-mute">Exact position measured on the rendered page.</p>
+        <p className="mt-1 text-[12px] text-ink-mute">Position measured on the rendered page.</p>
       </Step>
+      {verdict && verdict.quality !== "unverified" && (
+        <Step label="Is this a good spot?">
+          <span className="flex items-start gap-2">
+            <Chip tone={verdict.quality === "good" ? "go" : "amber"}>{verdict.quality === "good" ? "Good spot" : "Check this spot"}</Chip>
+          </span>
+          <span className="mt-1 block text-[13px] text-ink-soft">{verdict.note}</span>
+        </Step>
+      )}
       <Step label="Why">{s.reasoning[0]}</Step>
       <Step label="Where it leads"><span className="inline-flex items-center gap-1.5">{s.label} <ArrowRight className="size-3.5" aria-hidden /> {target?.label ?? "—"}</span></Step>
       <div className="mt-5 flex flex-wrap items-center gap-2">

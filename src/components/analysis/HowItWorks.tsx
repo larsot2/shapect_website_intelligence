@@ -7,8 +7,9 @@ import { Chip, Drawer, SectionHeading } from "@/components/ui";
 import { useAnalysis } from "./AnalysisContext";
 import { EvidenceList } from "./Evidence";
 import { capabilityLabel, coverageLabel, coverageTone } from "./labels";
+import { stepBasis } from "@/lib/blueprint/derive";
 
-export function HowItWorks() {
+export function HowItWorks({ embedded = false }: { embedded?: boolean }) {
   const { bp, asset } = useAnalysis();
   const [why, setWhy] = useState(false);
   const primary = bp.journeys.find((j) => j.primary) ?? bp.journeys[0];
@@ -18,9 +19,16 @@ export function HowItWorks() {
 
   return (
     <section aria-labelledby="how-title">
-      <SectionHeading id="how" eyebrow="How your website works today" title={`${bp.conversionStrategy.label}`}>
-        <button type="button" onClick={() => setWhy(true)} className="text-sm font-medium text-go hover:underline">How we know</button>
-      </SectionHeading>
+      {embedded ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[13px] text-ink-mute">Solid boxes are on your website. <span className="rounded border border-dashed border-ink-mute/60 px-1">Dashed</span> boxes are our interpretation.</p>
+          <button type="button" onClick={() => setWhy(true)} className="text-sm font-medium text-go hover:underline">How we know</button>
+        </div>
+      ) : (
+        <SectionHeading id="how" eyebrow="How your website works today" title={`${bp.conversionStrategy.label}`}>
+          <button type="button" onClick={() => setWhy(true)} className="text-sm font-medium text-go hover:underline">How we know</button>
+        </SectionHeading>
+      )}
 
       <div className="rounded-2xl border border-line bg-paper p-6 sm:p-8">
         <JourneyRow j={primary} large />
@@ -101,9 +109,11 @@ function JourneyRow({ j, large = false }: { j: Journey; large?: boolean }) {
         {j.steps.map((s, i) => {
           const a = s.assetId ? asset(s.assetId) : undefined;
           const Icon = s.kind === "outcome" ? CircleCheck : a?.kind === "phone" ? PhoneCall : a ? MousePointerClick : FileText;
+          const inferred = stepBasis(s) === "inferred";
           return (
             <li key={s.id} className="flex items-center">
-              <div className={`rounded-xl border ${s.kind === "outcome" ? "border-go/30 bg-go-soft/60" : "border-line bg-canvas/60"} ${large ? "px-4 py-3" : "px-3 py-2"}`}>
+              <div title={inferred ? "Our interpretation — not shown on your website" : undefined}
+                className={`rounded-xl border ${inferred ? "border-dashed border-ink-mute/50 bg-paper" : s.kind === "outcome" ? "border-go/30 bg-go-soft/60" : "border-line bg-canvas/60"} ${large ? "px-4 py-3" : "px-3 py-2"}`}>
                 <div className={`flex items-center gap-2 font-medium ${large ? "text-[15px]" : "text-[13px]"}`}>
                   <Icon className={`size-4 shrink-0 ${s.kind === "outcome" ? "text-go" : "text-ink-mute"}`} aria-hidden />
                   {s.label}
@@ -111,7 +121,8 @@ function JourneyRow({ j, large = false }: { j: Journey; large?: boolean }) {
                 {large && s.pageIds.length > 0 && (
                   <p className="mt-0.5 pl-6 text-[12px] text-ink-mute">{s.pageIds.map((p) => page(p)?.title).join(" · ")}</p>
                 )}
-                {large && a?.siteWide && <p className="mt-0.5 pl-6 text-[12px] text-ink-mute">On every page</p>}
+                {large && a?.siteWide && <p className="mt-0.5 pl-6 text-[12px] text-ink-mute">On most pages</p>}
+                {inferred && <p className="mt-0.5 pl-6 text-[11px] text-ink-mute italic">likely — not shown on your website</p>}
               </div>
               {i < j.steps.length - 1 && <ChevronRight className="mx-1.5 size-4 shrink-0 text-ink-mute" aria-hidden />}
             </li>

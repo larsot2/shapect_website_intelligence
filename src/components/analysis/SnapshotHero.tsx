@@ -5,6 +5,7 @@ import { ArrowDown, MonitorSmartphone } from "lucide-react";
 import { RescanButton } from "./RescanButton";
 import { useAnalysis } from "./AnalysisContext";
 import { Shot } from "./Shot";
+import { stepBasis } from "@/lib/blueprint/derive";
 
 export function SnapshotHero() {
   const { bp, base } = useAnalysis();
@@ -12,6 +13,7 @@ export function SnapshotHero() {
     bp.conversionAssets.filter((a) => ["contact_form", "multi_step_form", "booking", "phone", "email", "chat"].includes(a.kind)).map((a) => a.kind),
   );
   const host = new URL(bp.website.url).host;
+  const primary = bp.journeys.find((j) => j.primary) ?? bp.journeys[0];
   const stats = [
     { value: bp.diagnostics.scannedPageCount, label: "pages read" },
     { value: contactKinds.size, label: "ways to get in touch" },
@@ -28,8 +30,22 @@ export function SnapshotHero() {
           {bp.source.kind === "scan" && <> · analysed {new Date(bp.analysis.finishedAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}</>}
         </p>
         <p className="mt-5 max-w-[540px] text-[17px] leading-relaxed text-ink-soft">{bp.website.summary}</p>
+        {primary && bp.conversionStrategy.value !== "unknown" && (
+          <div className="mt-5">
+            <p className="text-[12px] text-ink-mute">How visitors reach you today · <span className="font-medium text-ink-soft">{bp.conversionStrategy.label}</span></p>
+            <ol className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[13px]">
+              {primary.steps.map((st, i) => (
+                <li key={st.id} className="flex items-center gap-1.5">
+                  <span title={stepBasis(st) === "inferred" ? "Our interpretation — not shown on your website" : undefined}
+                    className={`rounded-md px-2 py-0.5 ${stepBasis(st) === "inferred" ? "border border-dashed border-ink-mute/50 text-ink-mute" : "bg-paper text-ink-soft ring-1 ring-line"}`}>{st.label}</span>
+                  {i < primary.steps.length - 1 && <span className="text-ink-mute" aria-hidden>→</span>}
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
 
-        <dl className="mt-7 flex flex-wrap gap-x-8 gap-y-4">
+        <dl className="mt-6 flex flex-wrap gap-x-8 gap-y-4">
           {stats.map((s) => (
             <div key={s.label}>
               <dt className="sr-only">{s.label}</dt>
@@ -41,7 +57,7 @@ export function SnapshotHero() {
 
         <div className="mt-8 flex flex-wrap gap-3">
           <a href="#recommendations" className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-ink px-4 text-sm font-medium text-white hover:bg-ink/90">
-            See what we found <ArrowDown className="size-4" aria-hidden />
+            See recommendations <ArrowDown className="size-4" aria-hidden />
           </a>
           <Link href={`${base}/preview`} className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-line bg-paper px-4 text-sm font-medium hover:border-ink-mute">
             <MonitorSmartphone className="size-4" aria-hidden /> Website preview

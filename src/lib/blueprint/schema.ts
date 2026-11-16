@@ -155,6 +155,8 @@ export const JourneyStepSchema = z.object({
   kind: z.enum(["pages", "content", "asset", "outcome"]),
   pageIds: z.array(id).default([]),
   assetId: id.optional(),
+  /** observed = visible on the website; inferred = plausible but not shown (e.g. internal follow-up). */
+  basis: z.enum(["observed", "inferred"]).optional(),
 });
 
 export const JourneySchema = z.object({
@@ -187,6 +189,8 @@ export const ExperienceSuggestionSchema = z.object({
   currentState: shortText.optional(),
   /** What the owner must confirm before this could ever be built. */
   prerequisites: z.array(shortText).default([]),
+  /** Conceptual visitor flow of the proposed experience (2–4 steps) — not generated or activated. */
+  experienceSteps: z.array(z.object({ title: z.string().min(1).max(60), detail: z.string().max(180) })).max(4).default([]),
   supportedRecipeKey: z.string().optional(),
   capabilityKeys: z.array(z.string()),
   pageContexts: z.array(z.object({ pageId: id, perspective: z.string().optional(), startingHook: z.string().max(140) })).min(1),
@@ -229,6 +233,10 @@ export const ConnectionSuggestionSchema = z.object({
   possibleSharedFields: z.array(z.string()),
   requiresValidation: z.boolean(),
   integrationStatus: z.enum(["concept_only", "link_only", "unknown"]),
+  /** Information the target would still need to ask for. */
+  missingFields: z.array(z.string()).default([]),
+  /** Limits on reuse, e.g. "pricing only with a confirmed pricing basis". */
+  constraints: z.array(shortText).default([]),
   rationale: shortText,
   evidence: z.array(EvidenceSchema),
 });

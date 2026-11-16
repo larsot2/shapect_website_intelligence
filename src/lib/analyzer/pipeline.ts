@@ -353,6 +353,8 @@ function assemble(a: AssembleArgs): Blueprint {
     const steps = j.steps.map((s, si) => ({
       id: `s${si + 1}`, label: clip(s.label, 60), kind: s.kind, pageIds: s.pageIds.filter((p) => pageById.has(p)),
       assetId: s.assetId && assetIds.has(s.assetId) ? s.assetId : undefined,
+      // an outcome is only "observed" if the model says so AND it's tied to evidence on the site
+      basis: s.kind === "outcome" && s.basis === "observed" && !(s.assetId && assetIds.has(s.assetId)) ? ("inferred" as const) : s.basis,
     })).filter((s) => s.kind !== "asset" || s.assetId);
     if (steps.length < 2) return;
     const evidence = steps.map((s) => s.assetId && conversionAssets.find((x) => x.id === s.assetId)?.evidence[0]).filter(Boolean) as Evidence[];
@@ -390,6 +392,7 @@ function assemble(a: AssembleArgs): Blueprint {
       id: sid, label: clip(s.label, 48), action: s.action,
       headline: clip(s.headline, 200), customerNeed: clip(s.customerNeed, 240), businessGoal: clip(s.businessGoal, 240),
       whatHappensNext: clip(s.whatHappensNext, 240), currentState: clip(s.currentState, 240), prerequisites: s.prerequisites.map((x) => clip(x, 220)),
+      experienceSteps: s.experienceSteps.map((x) => ({ title: clip(x.title, 60), detail: clip(x.detail, 180) })),
       capabilityKeys: s.capabilityKeys,
       pageContexts: s.pageContexts.map((c) => ({ pageId: c.pageId, perspective: c.perspective ?? undefined, startingHook: clip(c.startingHook, 140) })),
       touchpoints: s.touchpoints.map((t, ti) => {
@@ -428,14 +431,14 @@ function assemble(a: AssembleArgs): Blueprint {
     suggestedConnections.push({
       id: `cn-${suggestedConnections.length + 1}`, fromSuggestionId: from, to: toS ? { kind: "suggestion", id: toS } : { kind: "existing_asset", id: toA! },
       relation: toS ? (c.relation === "existing_destination" ? "suggested_continuation" : c.relation) : "existing_destination",
-      intent: c.intent, possibleSharedFields: c.sharedFields.slice(0, 6), requiresValidation: true,
+      intent: c.intent, possibleSharedFields: c.sharedFields.slice(0, 6), missingFields: c.missingFields.slice(0, 6), constraints: c.constraints.map((x) => clip(x, 200)), requiresValidation: true,
       integrationStatus: toS ? "concept_only" : "link_only", rationale: clip(c.rationale, 240), evidence: [],
     });
   }
   // every suggestion that names an existing target gets a visible destination link
   for (const s of suggestedExperiences) {
     if (s.conversionTargetAssetId && !suggestedConnections.some((c) => c.fromSuggestionId === s.id && c.to.kind === "existing_asset")) {
-      suggestedConnections.push({ id: `cn-${suggestedConnections.length + 1}`, fromSuggestionId: s.id, to: { kind: "existing_asset", id: s.conversionTargetAssetId }, relation: "existing_destination", intent: "consult", possibleSharedFields: [], requiresValidation: true, integrationStatus: "link_only", rationale: clip(s.whatHappensNext, 240), evidence: [] });
+      suggestedConnections.push({ id: `cn-${suggestedConnections.length + 1}`, fromSuggestionId: s.id, to: { kind: "existing_asset", id: s.conversionTargetAssetId }, relation: "existing_destination", intent: "consult", possibleSharedFields: [], missingFields: [], constraints: [], requiresValidation: true, integrationStatus: "link_only", rationale: clip(s.whatHappensNext, 240), evidence: [] });
     }
   }
 

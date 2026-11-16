@@ -31,7 +31,15 @@ interface AnalysisValue {
 
 const Ctx = createContext<AnalysisValue | null>(null);
 
-export function AnalysisProvider({ bp, children }: { bp: Blueprint; children: React.ReactNode }) {
+/** Display-only label cleanup for older snapshots ("Form: “SUBMIT”" → "Enquiry form"); the snapshot itself is untouched. */
+function displayLabel(a: Blueprint["conversionAssets"][number]): string {
+  const generic = /^(form|calculator)\s*[:(]|^(submit|send|go)$/i.test(a.label.trim());
+  if (!generic) return a.label === a.label.toUpperCase() && /[A-Z]{3}/.test(a.label) ? a.label.charAt(0) + a.label.slice(1).toLowerCase() : a.label;
+  return ({ contact_form: "Enquiry form", multi_step_form: "Multi-step enquiry", calculator: "Calculator", upload: "Upload form" } as Record<string, string>)[a.kind] ?? a.label;
+}
+
+export function AnalysisProvider({ bp: raw, children }: { bp: Blueprint; children: React.ReactNode }) {
+  const bp = useMemo(() => ({ ...raw, conversionAssets: raw.conversionAssets.map((a) => ({ ...a, label: displayLabel(a) })) }), [raw]);
   const [review, setReview] = useState<ReviewState>(() => emptyReview(bp));
   const [hydrated, setHydrated] = useState(false);
   const [saveState, setSaveState] = useState<AnalysisValue["saveState"]>("idle");

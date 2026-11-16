@@ -59,7 +59,7 @@ describe("negative gates", () => {
     label: "Project Planner", action: "add", headline: "Plan your bathroom before you call", customerNeed: "n", currentState: "c", businessGoal: "g",
     whatHappensNext: "w", capabilityKeys: ["guided_questions"], pageContexts: [{ pageId: "home", startingHook: "Planning a bathroom?" }],
     touchpoints: [], conversionTargetAssetId: "form", projectFields: [], reasoning: ["r"], evidence: [{ pageId: "home", quote: "free on-site consultation" }],
-    confidence: 0.8, openQuestions: [], prerequisites: [], ...over,
+    confidence: 0.8, openQuestions: [], prerequisites: [], experienceSteps: [], ...over,
   });
   const ctx: GateContext = {
     hasRealCalculator: true, calculatorAssetIds: ["calc"], commercialPageIds: new Set(["commercial"]), unsupportedServicePageIds: new Set(["kitchen"]),

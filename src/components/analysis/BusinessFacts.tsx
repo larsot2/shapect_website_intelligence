@@ -15,7 +15,7 @@ const dimensionLabel: Record<Service["dimension"], string> = {
   region: "Areas",
 };
 
-export function BusinessFacts() {
+export function BusinessFacts({ embedded = false }: { embedded?: boolean }) {
   const { bp } = useAnalysis();
   const groups = Object.entries(
     bp.services.reduce<Record<string, Service[]>>((acc, s) => ((acc[s.dimension] ??= []).push(s), acc), {}),
@@ -26,13 +26,14 @@ export function BusinessFacts() {
 
   return (
     <section aria-labelledby="facts-title">
-      <SectionHeading id="business" eyebrow="What we learned about your business" title="Is this right?" />
+      {!embedded && <SectionHeading id="business" eyebrow="What we learned about your business" title="Is this right?" />}
       <div className="grid gap-5 lg:grid-cols-[1fr_1.35fr]">
         <div className="rounded-2xl border border-line bg-paper p-6">
           <div className="mb-5 flex flex-wrap gap-2">
             <Chip tone={scopes.has("residential") ? "dark" : "neutral"}>Residential</Chip>
-            <Chip tone={scopes.has("commercial") ? "dark" : "neutral"}>{scopes.has("commercial") ? "Commercial — not fully supported yet" : "No commercial work found"}</Chip>
+            <Chip tone={scopes.has("commercial") ? "dark" : "neutral"}>{scopes.has("commercial") ? "Commercial work" : "No commercial work found"}</Chip>
           </div>
+          {scopes.has("commercial") && <p className="-mt-2 mb-4 text-[12px] text-ink-mute">We recognised your commercial work. Shapect&apos;s experiences focus on residential bathrooms for now — that&apos;s our limit, not yours.</p>}
           <div className="space-y-5">
             {groups.map(([dim, items]) => (
               <div key={dim}>
@@ -41,7 +42,7 @@ export function BusinessFacts() {
                   {items.map((s) => (
                     <span key={s.id} className={`rounded-lg border px-3 py-1.5 text-[14px] ${s.supportedInV1 ? "border-line bg-canvas/50" : "border-dashed border-line text-ink-mute"}`}>
                       {s.label}
-                      {!s.supportedInV1 && <span className="ml-1.5 text-[12px]">· not supported yet</span>}
+                      {!s.supportedInV1 && <span className="ml-1.5 text-[12px]">· Shapect can&apos;t help here yet</span>}
                     </span>
                   ))}
                 </div>

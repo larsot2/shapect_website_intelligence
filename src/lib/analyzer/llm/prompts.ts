@@ -88,7 +88,7 @@ JSON shape:
  "assets":[{"assetId","label (owner-friendly name ≤ 4 words, e.g. 'Quote request form', 'Get a quote button')","role":"primary|secondary|minor|not_a_conversion","isRealCalculator"?,"observedOutcome"? (what demonstrably happens after the click)}],
  "conversionStrategy":{"value":"consultation|calculation|qualification|appointment|routing|mixed|unknown","label (e.g. 'Consultation-first')","rationale","evidence":[{"pageId","quote"}]},
  "coverage":[{"capability","level":"covered|partial|none|unknown","note (≤ 20 words, owner-friendly)","assetIds":[]}],
- "journeys":[{"label","primary":bool,"steps":[{"label","kind":"pages|content|asset|outcome","pageIds":[],"assetId"?}]}],
+ "journeys":[{"label","primary":bool,"steps":[{"label","kind":"pages|content|asset|outcome","pageIds":[],"assetId"?,"basis":"observed|inferred" (observed only if the website shows it; internal follow-up like 'business calls back' is inferred unless the site states it)}]}],
  "visitorDecisions":[{"decision (what visitors are trying to decide)","pageIds":[],"coverage":"covered|partial|none"}],
  "needMorePages":[{"id","reason"}]}
 
@@ -145,6 +145,7 @@ Hard rules (violations are discarded automatically):
 - Suburb/SEO pages: never separate experiences per suburb; one entry may use several pages as starting contexts.
 - No invented prices, products, guarantees, licences, instant/binding quotes, "guaranteed" or "in minutes" hooks. If price willingness is unclear, ask it as openQuestion.
 - Every suggestion must name the existing conversion target (assetId from inventory) it leads to, unless none exists.
+- Touchpoints: one per page; never two suggestions in the same section; avoid the hero and the main CTA area unless replacing/bridging that CTA; prefer the section where the visitor's question arises (cost section, design section, end of an article).
 - Touchpoints: use sectionId from CAPTURED SECTIONS when a placement fits a section; use assetId (with placementKind beside_cta/replace_cta) when it relates to an existing CTA. Prefer pages with captures.
 - evidence quotes must be VERBATIM text from the data (≤ 25 words).
 - Hooks/headlines: short, plain, customer language; no hype.
@@ -179,9 +180,9 @@ ${FENCE_CLOSE}
 
 JSON shape:
 {"keepAsIs":bool,"keepAsIsReason"?,
- "suggestions":[{"label (2–4 words, e.g. 'Bathroom Project Planner')","action":"add|improve|connect|reposition","headline (one line customer value)","customerNeed","currentState (what the website does today for this)","businessGoal","whatHappensNext","capabilityKeys":[],"pageContexts":[{"pageId","perspective"?,"startingHook"}],"touchpoints":[{"pageId","sectionId"?,"assetId"?,"placementKind":"inline_section|replace_cta|beside_cta|hero_secondary|end_of_article","headline"}],"conversionTargetAssetId","projectFields":[{"key","label","semantics","usage":"may_collect|could_reuse_later|needs_confirmation"}],"reasoning":["2–3 short owner-friendly reasons"],"evidence":[{"pageId","quote"}],"confidence":0..1,"openQuestions":[],"prerequisites":[]}],
+ "suggestions":[{"label (2–4 words, e.g. 'Bathroom Project Planner')","action":"add|improve|connect|reposition","headline (one line customer value)","customerNeed","currentState (what the website does today for this)","businessGoal","whatHappensNext","capabilityKeys":[],"pageContexts":[{"pageId","perspective"?,"startingHook"}],"touchpoints":[{"pageId","sectionId"?,"assetId"?,"placementKind":"inline_section|replace_cta|beside_cta|hero_secondary|end_of_article","headline"}],"conversionTargetAssetId","projectFields":[{"key","label","semantics","usage":"may_collect|could_reuse_later|needs_confirmation"}],"experienceSteps":[{"title (2–5 words)","detail (≤ 20 words, what the visitor does/gets)"}] (2–4 steps; the last step hands over to the existing conversion target),"reasoning":["2–3 short owner-friendly reasons"],"evidence":[{"pageId","quote"}],"confidence":0..1,"openQuestions":[],"prerequisites":[]}],
  "assetActions":[{"assetId","pageId","proposal","rationale","relatedSuggestion"? (label)}],
- "connections":[{"from (suggestion label)","toSuggestion"? (label),"toAssetId"?,"relation":"suggested_continuation|same_experience_multiple_pages|existing_destination","intent":"continue|explore|consult|estimate","sharedFields":[],"rationale"}],
+ "connections":[{"from (suggestion label)","toSuggestion"? (label),"toAssetId"?,"relation":"suggested_continuation|same_experience_multiple_pages|existing_destination","intent":"continue|explore|consult|estimate","sharedFields":[] (ProjectState keys the target could reuse),"missingFields":[] (keys the target would still need to ask),"constraints":[] (e.g. 'Style is a preference, not a product choice', 'Prices only with a confirmed pricing basis'),"rationale"}],
  "opportunities":[{"label","reason":"unsupported_scope|missing_capability|weak_evidence|needs_owner_input","note"}],
  "notSuggested":[{"label","note (what we deliberately don't suggest and why)"}]}`;
 }

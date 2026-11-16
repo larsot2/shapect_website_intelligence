@@ -8,18 +8,18 @@ import { Shot } from "./Shot";
 import { DeleteScanButton } from "./DeleteScanButton";
 
 const opportunityLabel = {
-  unsupported_scope: "Outside what we support yet",
-  missing_capability: "Not possible yet",
+  unsupported_scope: "Not covered by Shapect yet",
+  missing_capability: "Shapect can't do this yet",
   weak_evidence: "Not enough evidence",
   needs_owner_input: "Your call",
 } as const;
 
-export function ScanDetails() {
+export function ScanDetails({ embedded = false }: { embedded?: boolean }) {
   const { bp, base, screenshot } = useAnalysis();
   return (
     <section aria-labelledby="scan-title" className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
       <div>
-        <SectionHeading id="pages" eyebrow={`${bp.diagnostics.scannedPageCount} read · ${bp.diagnostics.skippedPageCount} grouped or skipped`} title="What we read" />
+        {embedded ? <p className="mb-3 text-[13px] text-ink-mute">{bp.diagnostics.scannedPageCount} pages read closely · {bp.diagnostics.skippedPageCount} grouped or not needed</p> : <SectionHeading id="pages" eyebrow={`${bp.diagnostics.scannedPageCount} read · ${bp.diagnostics.skippedPageCount} grouped or skipped`} title="What we read" />}
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {bp.pages.filter((p) => screenshot(p.id)).map((p) => (
             <li key={p.id}>

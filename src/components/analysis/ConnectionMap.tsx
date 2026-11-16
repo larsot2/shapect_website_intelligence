@@ -5,15 +5,16 @@ import { Link2Off, RotateCcw } from "lucide-react";
 import type { ConnectionSuggestion } from "@/lib/blueprint/schema";
 import { Button, Chip, SectionHeading } from "@/components/ui";
 import { useAnalysis } from "./AnalysisContext";
+import { connectionState, type Mechanism } from "@/lib/blueprint/derive";
 
 type Edge = { from: string; to: string; style: "page" | "continuation" | "destination"; connectionId?: string };
 type Line = Edge & { d: string };
 
-const relationLabel = {
-  suggested_continuation: "Suggested continuation",
-  same_experience_multiple_pages: "Same experience on several pages",
-  existing_destination: "Your existing destination",
-} as const;
+const mechanismInfo: Record<Mechanism, { label: string; explain: string; tone: "go" | "neutral" | "sky" }> = {
+  bridge: { label: "Suggested bridge", explain: "A deliberate hand-over from one experience to another, offered to the visitor.", tone: "go" },
+  destination: { label: "Hand-over to your process", explain: "The experience ends in something you already have. Your process stays the same.", tone: "neutral" },
+  touchpoints: { label: "Same experience, several places", explain: "One experience with different starting points on different pages.", tone: "sky" },
+};
 
 export function ConnectionMap() {
   const { bp, page, asset, decisionFor } = useAnalysis();
@@ -75,7 +76,7 @@ export function ConnectionMap() {
 
   return (
     <section aria-labelledby="conn-title">
-      <SectionHeading id="connections" eyebrow="Planning only — not connected yet" title="How these experiences could work together" />
+      <SectionHeading id="connections" eyebrow="Planning only — nothing is connected yet" title="How it could work together" />
       <div className="rounded-2xl border border-line bg-paper p-6 sm:p-8">
         <div ref={box} className="relative grid gap-6 lg:grid-cols-[1fr_1.3fr_1fr] lg:gap-20">
           <svg className="pointer-events-none absolute inset-0 hidden size-full overflow-visible lg:block" aria-hidden>
@@ -123,12 +124,17 @@ export function ConnectionMap() {
         </div>
 
         <div className="mt-6 hidden flex-wrap gap-5 border-t border-line pt-4 text-[12px] text-ink-mute lg:flex">
-          <span className="flex items-center gap-2"><svg width="28" height="6" aria-hidden><path d="M0,3 H28" stroke="#e6e3dc" strokeWidth="2" /></svg> Same experience on several pages</span>
-          <span className="flex items-center gap-2"><svg width="28" height="6" aria-hidden><path d="M0,3 H28" stroke="#1d7a4f" strokeWidth="2" strokeDasharray="6 5" /></svg> Suggested continuation</span>
-          <span className="flex items-center gap-2"><svg width="28" height="6" aria-hidden><path d="M0,3 H28" stroke="#46535b" strokeWidth="2" /></svg> Leads to your existing destination</span>
+          <span className="flex items-center gap-2"><svg width="28" height="6" aria-hidden><path d="M0,3 H28" stroke="#e6e3dc" strokeWidth="2" /></svg> Touchpoint — where an experience appears</span>
+          <span className="flex items-center gap-2"><svg width="28" height="6" aria-hidden><path d="M0,3 H28" stroke="#1d7a4f" strokeWidth="2" strokeDasharray="6 5" /></svg> Suggested bridge — hand-over between experiences</span>
+          <span className="flex items-center gap-2"><svg width="28" height="6" aria-hidden><path d="M0,3 H28" stroke="#46535b" strokeWidth="2" /></svg> Hand-over to your existing process</span>
         </div>
 
-        <ul className="mt-6 grid gap-3 md:grid-cols-2">
+        <p className="mt-5 rounded-xl bg-canvas px-4 py-3 text-[13px] text-ink-soft">
+          <span className="font-semibold text-ink">Project information (ProjectState)</span> — what a visitor already told one experience could later be reused by the next, so nobody is asked twice.
+          This is separate from where an experience appears and from bridges. Shown here as a plan only.
+        </p>
+
+        <ul className="mt-4 grid gap-3 md:grid-cols-2">
           {connections.map((c) => (
             <ConnectionCard key={c.id} c={c} active={active === c.id} onFocus={() => setActive(c.id)} onBlur={() => setActive(null)} />
           ))}
@@ -148,8 +154,9 @@ function Column({ title, children }: { title: string; children: React.ReactNode 
 }
 
 function ConnectionCard({ c, active, onFocus, onBlur }: { c: ConnectionSuggestion; active: boolean; onFocus: () => void; onBlur: () => void }) {
-  const { suggestion, asset, decisionFor, decide, undo } = useAnalysis();
+  const { bp, suggestion, asset, decisionFor, decide, undo } = useAnalysis();
   const d = decisionFor("connection", c.id);
+  const st = connectionState(c, bp);
   const from = suggestion(c.fromSuggestionId)?.label;
   const to = c.to.kind === "suggestion" ? suggestion(c.to.id)?.label : asset(c.to.id)?.label;
   const [adjusting, setAdjusting] = useState(false);
@@ -165,13 +172,28 @@ function ConnectionCard({ c, active, onFocus, onBlur }: { c: ConnectionSuggestio
       data-testid={`connection-${c.id}`}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-[14px] font-semibold">{from} → {to}</p>
+        <Chip tone={mechanismInfo[st.mechanism].tone}>{mechanismInfo[st.mechanism].label}</Chip>
         <Chip className="ml-auto"><Link2Off className="size-3" aria-hidden /> Not connected yet</Chip>
       </div>
-      <p className="mt-1 text-[12px] text-ink-mute">{relationLabel[c.relation]}</p>
+      <p className="mt-2 text-[14px] font-semibold">{from} → {to}</p>
+      <p className="mt-0.5 text-[12px] text-ink-mute">{mechanismInfo[st.mechanism].explain}</p>
       <p className="mt-2 text-[14px] text-ink-soft">{c.rationale}</p>
-      {c.possibleSharedFields.length > 0 && (
-        <p className="mt-2 text-[13px]"><span className="text-ink-mute">Could carry forward:</span> {c.possibleSharedFields.map((f) => f.replace(/_/g, " ")).join(", ")}</p>
+      {(st.carry.length > 0 || st.missing.length > 0) && (
+        <div className="mt-3 grid gap-2 rounded-lg bg-canvas/70 p-3 text-[13px] sm:grid-cols-2">
+          <div>
+            <p className="text-[11px] font-semibold tracking-wide text-ink-mute uppercase">Could carry forward</p>
+            {st.carry.length ? (
+              <ul className="mt-1 space-y-0.5">{st.carry.map((x) => <li key={x.label}>{x.label}{x.note && <span className="text-ink-mute"> · {x.note}</span>}</li>)}</ul>
+            ) : <p className="mt-1 text-ink-mute">Nothing yet</p>}
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold tracking-wide text-ink-mute uppercase">Still to ask</p>
+            {st.missing.length ? <ul className="mt-1 space-y-0.5">{st.missing.map((x) => <li key={x}>{x}</li>)}</ul> : <p className="mt-1 text-ink-mute">—</p>}
+          </div>
+        </div>
+      )}
+      {st.constraints.length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-[12px] text-amber">{st.constraints.map((x) => <li key={x}>• {x}</li>)}</ul>
       )}
       {d?.status === "edited" && d.edits?.note && <p className="mt-2 rounded-lg bg-canvas px-3 py-2 text-[13px]">Your note: {d.edits.note}</p>}
       {adjusting ? (

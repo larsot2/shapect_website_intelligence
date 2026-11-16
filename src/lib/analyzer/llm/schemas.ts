@@ -67,6 +67,7 @@ export const UnderstandingSchema = z.object({
       kind: z.enum(["pages", "content", "asset", "outcome"]).catch("pages"),
       pageIds: z.array(z.string()).default([]),
       assetId: z.string().optional().nullable(),
+      basis: z.enum(["observed", "inferred"]).catch("inferred"),
     })).min(2).transform((a) => a.slice(0, 6)),
   })).min(1).transform((a) => a.slice(0, 4)),
   visitorDecisions: z.array(z.object({
@@ -110,6 +111,7 @@ export const StrategySchema = z.object({
     confidence: z.number().min(0).max(1).catch(0.5),
     openQuestions: upTo(s(220), 4).default([]),
     prerequisites: upTo(s(220), 4).default([]),
+    experienceSteps: upTo(z.object({ title: s(60), detail: s(180) }), 4).default([]),
   })).transform((a) => a.slice(0, 4)),
   assetActions: z.array(z.object({
     assetId: z.string(),
@@ -125,6 +127,8 @@ export const StrategySchema = z.object({
     relation: z.enum(["suggested_continuation", "same_experience_multiple_pages", "existing_destination"]).catch("suggested_continuation"),
     intent: z.enum(["continue", "explore", "consult", "estimate"]).catch("continue"),
     sharedFields: upTo(z.string().transform((v) => v.slice(0, 40)), 6).default([]),
+    missingFields: upTo(z.string().transform((v) => v.slice(0, 40)), 6).default([]),
+    constraints: upTo(s(200), 3).default([]),
     rationale: s(240),
   })).transform((a) => a.slice(0, 6)).default([]),
   opportunities: z.array(z.object({
