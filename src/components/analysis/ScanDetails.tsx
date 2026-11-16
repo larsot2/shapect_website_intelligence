@@ -5,6 +5,7 @@ import { Info, Layers } from "lucide-react";
 import { Chip, SectionHeading } from "@/components/ui";
 import { useAnalysis } from "./AnalysisContext";
 import { Shot } from "./Shot";
+import { DeleteScanButton } from "./DeleteScanButton";
 
 const opportunityLabel = {
   unsupported_scope: "Outside what we support yet",
@@ -69,6 +70,7 @@ export function ScanDetails() {
           <ul className="mt-3 list-disc space-y-1 pl-4">
             {bp.diagnostics.limitations.map((l) => <li key={l}>{l}</li>)}
             <li>We only read public pages. We never submit forms, book, log in or change your website.</li>
+            {bp.source.kind === "scan" && <li>Screenshots and results are kept privately for 30 days.</li>}
           </ul>
           {bp.run && (
             <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line pt-4 text-center">
@@ -87,6 +89,7 @@ export function ScanDetails() {
               ))}
             </dl>
           )}
+          {bp.source.kind === "scan" && <div className="mt-3"><DeleteScanButton scanId={bp.scanId} /></div>}
           <p className="mt-3 text-[12px] text-ink-mute">{bp.source.kind === "scan" ? `Analysed with ${bp.analysis.model}` : "Demo fixture"} · {new Date(bp.analysis.finishedAt).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" })}</p>
         </div>
       </div>

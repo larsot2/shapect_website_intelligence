@@ -13,7 +13,7 @@ import { assetKindLabel, proposalLabel, reviewLabel, reviewTone } from "./labels
 
 type Marker =
   | { kind: "asset"; key: string; assetId: string; placement: string; bbox: BBox; n: number; action?: AssetAction }
-  | { kind: "touchpoint"; key: string; suggestionId: string; touchpointId: string; bbox: BBox };
+  | { kind: "touchpoint"; key: string; suggestionId: string; touchpointId: string; bbox: BBox; stack: number };
 
 const groupOrder = ["home", "services", "design", "costs", "contact", "trust", "other"] as const;
 const groupLabel = { home: "Home", services: "Services", design: "Design", costs: "Costs", contact: "Contact", trust: "Trust", other: "Other" };
@@ -59,7 +59,10 @@ export function WebsitePreview() {
       for (const t of s.touchpoints) {
         if (t.pageId !== pageId) continue;
         const bbox = t.bboxes.find((b) => b.viewport === vp);
-        if (bbox) out.push({ kind: "touchpoint", key: t.id, suggestionId: s.id, touchpointId: t.id, bbox });
+        if (!bbox) continue;
+        // several suggestions can share one section: stack their labels instead of overlapping
+        const same = out.filter((m) => m.kind === "touchpoint" && Math.abs(m.bbox.x - bbox.x) < 24 && Math.abs(m.bbox.y - bbox.y) < 24 && Math.abs(m.bbox.width - bbox.width) < 40).length;
+        out.push({ kind: "touchpoint", key: t.id, suggestionId: s.id, touchpointId: t.id, bbox, stack: same });
       }
     }
     return out;
@@ -178,8 +181,8 @@ function MarkerBox({ m, w, h, selected, onSelect }: { m: Marker; w: number; h: n
   return (
     <button type="button" data-marker={m.key} onClick={onSelect} style={style} aria-pressed={selected}
       aria-label={`Suggested: ${s.label}`}
-      className={`absolute z-0 rounded-xl border-2 border-dashed transition-colors ${selected ? "border-go bg-go/15" : "border-go/70 bg-go/[.06] hover:bg-go/10"}`}>
-      <span className="absolute -top-3 left-3 inline-flex max-w-[calc(100%-24px)] items-center gap-1 truncate rounded-full bg-go px-2.5 py-0.5 text-[11px] font-medium text-white shadow">
+      className={`absolute z-0 rounded-xl border-2 border-dashed transition-colors ${selected ? "border-go bg-go/15" : m.stack > 0 ? "border-transparent bg-transparent" : "border-go/70 bg-go/[.06] hover:bg-go/10"}`}>
+      <span style={{ top: `${-12 - m.stack * 26}px` }} className="absolute left-3 inline-flex max-w-[calc(100%-24px)] items-center gap-1 truncate rounded-full bg-go px-2.5 py-0.5 text-[11px] font-medium text-white shadow">
         <Sparkles className="size-3 shrink-0" aria-hidden />
         <span className="truncate">{editedText(d, `touchpoint.${t.id}.headline`, t.headline)}</span>
       </span>

@@ -119,7 +119,7 @@ function extractForms($: cheerio.CheerioAPI): FormInfo[] {
       const label = labelFor($, el as Element);
       if (!label && type !== "file") return;
       const options = el.tagName === "select" ? $el.find("option").map((_, o) => clean($(o).text())).get().filter(Boolean).slice(0, 12) : undefined;
-      fields.push({ label: label || "File upload", type, required: $el.is("[required]") || /required/i.test($el.attr("aria-required") ?? ""), options });
+      fields.push({ label: (label || "File upload").replace(/\s*\*+\s*$/, ""), type, required: $el.is("[required]") || /required/i.test($el.attr("aria-required") ?? ""), options });
     });
     // collapse radio/checkbox groups into one field
     const merged: FormField[] = [];
@@ -139,7 +139,7 @@ function extractForms($: cheerio.CheerioAPI): FormInfo[] {
       fields: merged.slice(0, 25),
       submitText: submitText.slice(0, 60) || undefined,
       hasUpload: merged.some((m) => m.type === "file"),
-      multiStep: /step\s*\d|data-step|gform_page|multi-?step|wizard|progress/i.test(html),
+      multiStep: /step\s*\d|data-step|gform_page|multi-?step|wizard|progress/i.test(html) || /^(continue|next)\b/i.test(submitText),
       provider,
       looksLikeCalculator,
     });

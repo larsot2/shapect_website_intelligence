@@ -136,6 +136,8 @@ export interface CompleteOptions<T> {
   schema: z.ZodType<T>;
   usage: LlmUsage;
   promptVersion: string;
+  /** called when the provider is busy and we wait before retrying */
+  onWait?: (seconds: number) => void;
 }
 
 /**
@@ -166,9 +168,11 @@ export async function completeJson<T>(o: CompleteOptions<T>): Promise<T> {
         break;
       } catch (e) {
         const transient = /429|rate limit|503|502|overloaded|ECONNRESET|socket/i.test((e as Error).message);
-        if (!transient || tryNo >= 3) throw e;
-        o.usage.failures.push(`${o.task}: transient provider error, retrying`);
-        await new Promise((res) => setTimeout(res, Math.min(60_000, 12_000 * 2 ** tryNo)));
+        if (!transient || tryNo >= 4) throw e;
+        o.usage.failures.push(`${o.task}: provider busy, retrying`);
+        const wait = [20, 40, 60, 60][tryNo] * 1000;
+        o.onWait?.(wait / 1000);
+        await new Promise((res) => setTimeout(res, wait));
       }
     }
     o.usage.durationMs += Date.now() - t0;

@@ -81,8 +81,15 @@ export async function listJobs(): Promise<JobState[]> {
   } catch {
     return [];
   }
-  const jobs = await Promise.all(names.filter(isScanId).map((n) => readJob(n)));
-  return (jobs.filter(Boolean) as JobState[]).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const jobs = (await Promise.all(names.filter(isScanId).map((n) => readJob(n)))).filter(Boolean) as JobState[];
+  // retention: private screenshots and snapshots don't live forever
+  const cutoff = Date.now() - config.retentionDays * 86_400_000;
+  const keep: JobState[] = [];
+  for (const j of jobs) {
+    if (Date.parse(j.createdAt) < cutoff && j.status !== "running" && j.status !== "queued") await deleteScan(j.scanId).catch(() => {});
+    else keep.push(j);
+  }
+  return keep.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function deleteScan(id: string) {

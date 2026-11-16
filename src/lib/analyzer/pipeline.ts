@@ -51,6 +51,7 @@ export async function runScan(job: JobState): Promise<void> {
     job.activity = [...job.activity, line].slice(-12);
     save().catch(() => {});
   };
+  const busy = (sec: number) => log(`The AI service is busy — trying again in ${sec}s`);
   const enter = async (key: PhaseKey) => {
     if (job.phase) job.phases[job.phase].status = "done";
     job.phase = key;
@@ -108,7 +109,7 @@ export async function runScan(job: JobState): Promise<void> {
         });
         log("Asking GPT-5.5 what your business really offers");
         understanding = await completeJson({
-          task: "understanding", schema: UnderstandingSchema, usage, promptVersion: PROMPT_VERSION,
+          task: "understanding", schema: UnderstandingSchema, usage, promptVersion: PROMPT_VERSION, onWait: busy,
           prompt: buildUnderstandingPrompt({ host: st.rootHost, pages, assets, notRead: notReadSummary(st), followUps: follow, budgetChars: config.llmMaxInputChars - 9_000 }),
         });
         // adaptive depth: read what the model says is missing, then re-run once
@@ -122,7 +123,7 @@ export async function runScan(job: JobState): Promise<void> {
           pages = toSitePages(st);
           assets = buildInventory(pages);
           understanding = await completeJson({
-            task: "understanding-followup", schema: UnderstandingSchema, usage, promptVersion: PROMPT_VERSION,
+            task: "understanding-followup", schema: UnderstandingSchema, usage, promptVersion: PROMPT_VERSION, onWait: busy,
             prompt: buildUnderstandingPrompt({ host: st.rootHost, pages, assets, notRead: notReadSummary(st), followUps: [], budgetChars: config.llmMaxInputChars - 9_000 }),
           });
         }
@@ -156,7 +157,7 @@ export async function runScan(job: JobState): Promise<void> {
       try {
         log("Working out where Shapect could genuinely help");
         strategy = await completeJson({
-          task: "strategy", schema: StrategySchema, usage, promptVersion: PROMPT_VERSION,
+          task: "strategy", schema: StrategySchema, usage, promptVersion: PROMPT_VERSION, onWait: busy,
           prompt: buildStrategyPrompt({ host: st.rootHost, understanding, assets, pages, sections: sectionsText(captures, pages), gateFacts: gateFacts(assets, understanding, pages) }),
         });
       } catch (e) {

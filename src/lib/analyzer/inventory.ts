@@ -77,9 +77,13 @@ export function buildInventory(pages: SitePage[]): InvAsset[] {
         const target = c.kind === "internal" ? byKey.get(targetKey) : undefined;
         if (target?.id === p.id) continue; // self link
         const external = c.kind === "external";
-        const bookingHref = /calendly|acuity|setmore|simplybook|hubspot.*meetings|youcanbook|servicem8|cal\.com|tidycal|\/(book|booking|bookings|appointments?|schedule)(\/|$|\?)/i.test(c.href);
+        const bookingTool = /calendly|acuity|setmore|simplybook|hubspot.*meetings|youcanbook|servicem8|cal\.com|tidycal/i.test(c.href);
+        const bookingPath = /\/(book|booking|bookings|appointments?|schedule)(\/|$|\?)/i.test(c.href);
         const bookingText = /\bbook\b.*\b(consult\w*|appointment|visit|call|meeting|time)\b|\bschedule\b/i.test(c.text);
-        const isBooking = bookingHref || (external && bookingText);
+        const pricingText = /price|estimat|quote|cost|calculat/i.test(c.text);
+        // a link to "/bookings" labelled "Price guide & estimate" is not a booking calendar
+        const isBooking = bookingTool || (bookingPath && !pricingText) || (external && bookingText);
+        const bookingHref = bookingTool || bookingPath;
         const k = `cta:${targetKey}`;
         add(k, () => ({
           id: "", kind: isBooking && (external || bookingHref) ? "booking" : external ? "third_party" : "cta_link", label: c.text, targetUrl: c.href,
@@ -92,7 +96,7 @@ export function buildInventory(pages: SitePage[]): InvAsset[] {
       const kind: InvAsset["kind"] = f.looksLikeCalculator ? "calculator" : f.multiStep ? "multi_step_form" : f.hasUpload && f.fields.length <= 3 ? "upload" : "contact_form";
       add(`form:${kind}:${sig}`, () => ({
         id: "", kind, label: f.submitText ? `${kind === "calculator" ? "Calculator" : "Form"}: “${f.submitText}”` : kind === "calculator" ? "Calculator" : "Enquiry form",
-        siteWide: false, fields: f.fields.map((x) => `${x.label}${x.required ? "*" : ""}${x.type === "select" || x.type === "radio" ? ` (${x.type}${x.options?.length ? `: ${x.options.slice(0, 6).join(" / ")}` : ""})` : x.type === "file" ? " (file upload)" : ""}`),
+        siteWide: false, fields: f.fields.map((x) => `${x.label.replace(/\s*\*+$/, "")}${x.required || /\*$/.test(x.label) ? "*" : ""}${x.type === "select" || x.type === "radio" ? ` (${x.type}${x.options?.length ? `: ${x.options.slice(0, 6).join(" / ")}` : ""})` : x.type === "file" ? " (file upload)" : ""}`),
         submitText: f.submitText, provider: f.provider, hasUpload: f.hasUpload, multiStep: f.multiStep, evidenceText: f.submitText ?? f.fields[0]?.label ?? "",
       }), { pageId: p.id, area: "main", text: f.submitText ?? "form" });
     }

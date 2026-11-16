@@ -174,7 +174,7 @@ ${args.sections || "-"}
 ${FENCE_OPEN}
 UNDERSTANDING: ${neutralise(understanding)}
 EVIDENCE TEXT PER PAGE (short):
-${neutralise(pageDossier(args.pages, args.assets, 14_000))}
+${neutralise(pageDossier(args.pages, args.assets, 10_000))}
 ${FENCE_CLOSE}
 
 JSON shape:

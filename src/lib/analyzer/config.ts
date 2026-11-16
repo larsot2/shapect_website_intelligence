@@ -28,10 +28,11 @@ export const config = {
   renderFallbackMinChars: 350, // render with a browser when static HTML has less main text
   // ---- llm
   llmMaxCalls: num("ANALYZER_LLM_MAX_CALLS", 5),
-  llmMaxInputChars: num("ANALYZER_LLM_MAX_INPUT_CHARS", 60_000), // per call (~15k tokens)
+  llmMaxInputChars: num("ANALYZER_LLM_MAX_INPUT_CHARS", 50_000), // per call (~12k tokens)
   llmTimeoutMs: num("ANALYZER_LLM_TIMEOUT_MS", 240_000),
   // ---- storage
   dataDir: process.env.ANALYZER_DATA_DIR ?? "data",
+  retentionDays: num("ANALYZER_RETENTION_DAYS", 30), // scans + screenshots are deleted after this
   httpCacheTtlMs: num("ANALYZER_HTTP_CACHE_TTL_MS", 12 * 3600_000),
 };
 

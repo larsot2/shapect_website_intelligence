@@ -13,7 +13,9 @@
     "fixture:capture": "node scripts/capture-fixture-screenshots.mjs",
     "fixture:validate": "vitest run tests/blueprint.test.ts",
     "smoke": "node scripts/ui-smoke.mjs",
-    "scan": "tsx scripts/scan.ts"
+    "scan": "tsx scripts/scan.ts",
+    "crawl:debug": "tsx scripts/crawl-debug.ts",
+    "acceptance:report": "tsx scripts/acceptance-report.ts"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
