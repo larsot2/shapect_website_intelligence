@@ -5,7 +5,7 @@ import { useAnalysis } from "./AnalysisContext";
 
 /** Small sticky summary — what's decided, and an honest reminder of what isn't changing. */
 export function ReviewProgress() {
-  const { bp, review, hydrated } = useAnalysis();
+  const { bp, review, hydrated, saveState } = useAnalysis();
   if (!hydrated) return null;
   const total = bp.suggestedExperiences.length + bp.businessClaims.filter((c) => c.critical).length;
   const done = Object.values(review.decisions).filter(
@@ -16,7 +16,10 @@ export function ReviewProgress() {
       <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-line bg-paper/95 py-2 pr-4 pl-3 text-[13px] shadow-lg backdrop-blur">
         <CheckCircle2 className={`size-4 ${done ? "text-go" : "text-ink-mute"}`} aria-hidden />
         <span><span className="font-semibold tabular-nums">{done}/{total}</span> reviewed</span>
-        <span className="hidden text-ink-mute sm:inline">· Saved in this analysis. Nothing on your website changes.</span>
+        <span className={`text-ink-mute ${saveState === "error" ? "!text-rose" : ""}`}>
+          · {saveState === "saving" ? "Saving…" : saveState === "error" ? "Couldn't save — retrying on next change" : "Saved"}
+        </span>
+        <span className="hidden text-ink-mute md:inline">· Nothing on your website changes.</span>
       </div>
     </div>
   );

@@ -66,7 +66,7 @@ function allowedEditKeys(bp: Blueprint, kind: ReviewTargetKind, id: string): Set
   }
 }
 
-const PROPOSALS = new Set(["keep", "replace", "redirect", "connect", "remove"]);
+const PROPOSALS = new Set(["keep", "replace", "redirect", "bridge", "remove"]);
 
 /**
  * Re-check stored decisions against the snapshot they belong to: decisions for
@@ -92,25 +92,24 @@ export function reconcile(bp: Blueprint, raw: unknown): ReviewState {
   return { ...base, decisions: out };
 }
 
-// ------------------------------------------------------------ local persistence (S1)
-// S4 replaces this with tenant-scoped server storage (website_analysis_reviews).
+// ------------------------------------------------------------ persistence
+// Stored server-side per scan + snapshot (data/reviews), separate from the snapshot.
 
-const storageKey = (bp: Pick<Blueprint, "scanId" | "snapshotVersion">) =>
-  `shapect.review.${bp.scanId}.${bp.snapshotVersion}`;
-
-export function loadLocalReview(bp: Blueprint): ReviewState {
+export async function loadReview(bp: Blueprint): Promise<ReviewState> {
   try {
-    const raw = window.localStorage.getItem(storageKey(bp));
-    return reconcile(bp, raw ? JSON.parse(raw) : null);
+    const res = await fetch(`/api/reviews/${bp.scanId}`, { cache: "no-store" });
+    if (!res.ok) return emptyReview(bp);
+    return reconcile(bp, await res.json());
   } catch {
     return emptyReview(bp);
   }
 }
 
-export function saveLocalReview(bp: Blueprint, state: ReviewState): void {
+export async function saveReview(bp: Blueprint, state: ReviewState): Promise<boolean> {
   try {
-    window.localStorage.setItem(storageKey(bp), JSON.stringify(state));
+    const res = await fetch(`/api/reviews/${bp.scanId}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(state) });
+    return res.ok;
   } catch {
-    /* storage unavailable (private mode) — state stays in memory */
+    return false;
   }
 }

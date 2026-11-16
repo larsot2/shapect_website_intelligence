@@ -224,7 +224,7 @@
     { "id": "aa-home-header-cta", "assetId": "cta-book-consultation", "pageId": "home", "proposal": "keep", "rationale": "Clear, consistent and on every page. Keep it as your main call to action." },
     { "id": "aa-home-phone", "assetId": "phone", "pageId": "home", "proposal": "keep", "rationale": "Direct calls work for people who are ready. Keep the number visible." },
     { "id": "aa-small-hero-cta", "assetId": "cta-book-consultation", "pageId": "small", "proposal": "keep", "rationale": "Keep the booking button. The planner sits further down for people who aren't ready yet.", "relatedSuggestionId": "sx-project-planner" },
-    { "id": "aa-cost-end-cta", "assetId": "cta-book-consultation", "pageId": "cost-guide", "proposal": "connect", "rationale": "Offer the planner beside this button, so readers who aren't ready to book still have a next step.", "relatedSuggestionId": "sx-project-planner" },
+    { "id": "aa-cost-end-cta", "assetId": "cta-book-consultation", "pageId": "cost-guide", "proposal": "bridge", "rationale": "Offer the planner beside this button, so readers who aren't ready to book still have a next step.", "relatedSuggestionId": "sx-project-planner" },
     { "id": "aa-contact-form", "assetId": "form-consultation", "pageId": "contact", "proposal": "keep", "rationale": "Keep your form and call-back promise. Only its questions could get clearer.", "relatedSuggestionId": "sx-better-request" }
   ],
   "suggestedConnections": [

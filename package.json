@@ -12,15 +12,19 @@
     "test": "vitest run",
     "fixture:capture": "node scripts/capture-fixture-screenshots.mjs",
     "fixture:validate": "vitest run tests/blueprint.test.ts",
-    "smoke": "node scripts/ui-smoke.mjs"
+    "smoke": "node scripts/ui-smoke.mjs",
+    "scan": "tsx scripts/scan.ts"
   },
   "dependencies": {
+    "cheerio": "^1.2.0",
     "geist": "^1.9.2",
     "lucide-react": "^1.73.0",
     "next": "^16.4.6",
+    "playwright": "^1.63.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "server-only": "^0.0.1",
+    "undici": "^8.12.4",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -31,6 +35,7 @@
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.4.6",
     "tailwindcss": "^4.3.5",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^5.1.0"
   }

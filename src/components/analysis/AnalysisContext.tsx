@@ -1,13 +1,13 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Blueprint, Viewport } from "@/lib/blueprint/schema";
 import {
   decide as decidePure,
   emptyReview,
-  loadLocalReview,
+  loadReview,
   reviewKey,
-  saveLocalReview,
+  saveReview,
   undo as undoPure,
   type ReviewDecision,
   type ReviewState,
@@ -18,6 +18,7 @@ interface AnalysisValue {
   bp: Blueprint;
   review: ReviewState;
   hydrated: boolean;
+  saveState: "idle" | "saving" | "saved" | "error";
   decide: (d: Omit<ReviewDecision, "decidedAt">) => void;
   undo: (kind: ReviewTargetKind, id: string) => void;
   decisionFor: (kind: ReviewTargetKind, id: string) => ReviewDecision | undefined;
@@ -33,22 +34,54 @@ const Ctx = createContext<AnalysisValue | null>(null);
 export function AnalysisProvider({ bp, children }: { bp: Blueprint; children: React.ReactNode }) {
   const [review, setReview] = useState<ReviewState>(() => emptyReview(bp));
   const [hydrated, setHydrated] = useState(false);
+  const [saveState, setSaveState] = useState<AnalysisValue["saveState"]>("idle");
+  const pending = useRef<ReviewState | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // Local persistence is browser-only; load after mount to avoid hydration mismatch.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setReview(loadLocalReview(bp));
-    setHydrated(true);
+    let alive = true;
+    loadReview(bp).then((r) => {
+      if (!alive) return;
+      setReview(r);
+      setHydrated(true);
+    });
+    return () => {
+      alive = false;
+    };
   }, [bp]);
+
+  const flush = useCallback(async () => {
+    const s = pending.current;
+    if (!s) return;
+    pending.current = null;
+    setSaveState("saving");
+    setSaveState((await saveReview(bp, s)) ? "saved" : "error");
+  }, [bp]);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); void flush(); }, [flush]);
+
+  // Leaving or reloading the page must not lose the last decision.
+  useEffect(() => {
+    const onHide = () => {
+      const s = pending.current;
+      if (!s) return;
+      pending.current = null;
+      navigator.sendBeacon?.(`/api/reviews/${bp.scanId}`, new Blob([JSON.stringify(s)], { type: "application/json" }));
+    };
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+  }, [bp.scanId]);
 
   const commit = useCallback(
     (fn: (s: ReviewState) => ReviewState) =>
       setReview((s) => {
         const next = fn(s);
-        saveLocalReview(bp, next);
+        pending.current = next;
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => void flush(), 250);
         return next;
       }),
-    [bp],
+    [flush],
   );
 
   const value = useMemo<AnalysisValue>(() => {
@@ -59,6 +92,7 @@ export function AnalysisProvider({ bp, children }: { bp: Blueprint; children: Re
       bp,
       review,
       hydrated,
+      saveState,
       decide: (d) => commit((s) => decidePure(s, d)),
       undo: (k, id) => commit((s) => undoPure(s, k, id)),
       decisionFor: (k, id) => review.decisions[reviewKey(k, id)],
@@ -68,7 +102,7 @@ export function AnalysisProvider({ bp, children }: { bp: Blueprint; children: Re
       screenshot: (pageId, vp = "desktop") => pages.get(pageId)?.screenshots.find((s) => s.viewport === vp),
       base: `/studio/website/${bp.scanId}`,
     };
-  }, [bp, review, hydrated, commit]);
+  }, [bp, review, hydrated, saveState, commit]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

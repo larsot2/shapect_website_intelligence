@@ -9,6 +9,13 @@ import { editedText, useAnalysis } from "./AnalysisContext";
 import { EvidenceList } from "./Evidence";
 import { Shot } from "./Shot";
 import { actionLabel, fieldUsageLabel, reviewLabel, reviewTone } from "./labels";
+import { incompleteParts } from "./PartialNotice";
+
+const capabilityText: Record<string, string> = {
+  guided_questions: "Guided questions", scope_summary: "Project summary", style_choices: "Style choices", preference_summary: "Preference summary",
+  budget_reference: "Your public price references", project_checklist: "Consultation checklist", existing_form_handoff: "Hands over to your form",
+  existing_booking_handoff: "Links to your booking", form_improvement_advice: "Form advice", cta_placement_advice: "Button advice",
+};
 
 type Panel = { kind: "review" | "why"; id: string } | null;
 
@@ -21,10 +28,15 @@ export function Recommendations() {
   return (
     <section aria-labelledby="rec-title">
       <SectionHeading id="recommendations" eyebrow={`${list.length} of at most 3`} title="What we recommend" />
-      {list.length === 0 ? (
+      {list.length === 0 && incompleteParts(bp).recommendations ? (
+        <div className="rounded-2xl border border-dashed border-line bg-paper/60 p-8">
+          <p className="text-lg font-semibold">No recommendations yet.</p>
+          <p className="mt-1 text-ink-soft">The AI part of this scan didn&apos;t finish, so we won&apos;t guess. Scan again to get recommendations.</p>
+        </div>
+      ) : list.length === 0 ? (
         <div className="rounded-2xl border border-line bg-paper p-8">
           <p className="text-lg font-semibold">Keep what you have.</p>
-          <p className="mt-1 text-ink-soft">Your website already covers the decisions visitors need to make. We don&apos;t suggest adding anything.</p>
+          <p className="mt-1 text-ink-soft">{bp.diagnostics.limitations.find((l) => l.startsWith("Keep what you have:"))?.replace("Keep what you have: ", "") ?? "Your website already covers the decisions visitors need to make. We don't suggest adding anything."}</p>
         </div>
       ) : (
         <div className="space-y-5">
@@ -40,7 +52,7 @@ export function Recommendations() {
 }
 
 function RecommendationCard({ s, index, onReview, onWhy }: { s: ExperienceSuggestion; index: number; onReview: () => void; onWhy: () => void }) {
-  const { asset, page, decisionFor, decide, undo } = useAnalysis();
+  const { asset, page, decisionFor, decide, undo, screenshot } = useAnalysis();
   const d = decisionFor("suggestion", s.id);
   const target = s.conversionTargetAssetId ? asset(s.conversionTargetAssetId) : undefined;
   const ActionIcon = s.action === "improve" ? Wrench : Sparkles;
@@ -99,17 +111,36 @@ function RecommendationCard({ s, index, onReview, onWhy }: { s: ExperienceSugges
       </div>
 
       <div className="relative border-t border-line bg-canvas/70 p-5 lg:border-t-0 lg:border-l">
-        <div className="grid h-full grid-cols-2 gap-3">
-          {s.pageContexts.slice(0, 2).map((c, i) => (
-            <figure key={c.pageId} className={s.pageContexts.length === 1 ? "col-span-2" : i === 0 ? "" : ""}>
-              <Shot pageId={c.pageId} className="aspect-[4/5] rounded-lg border border-line shadow-sm" />
-              <figcaption className="mt-2 line-clamp-2 text-[12px] leading-snug text-ink-soft">“{editedText(d, `pageContext.${c.pageId}.startingHook`, c.startingHook)}”</figcaption>
-            </figure>
-          ))}
-        </div>
-        {s.pageContexts.length > 2 && (
-          <p className="mt-2 text-[12px] text-ink-mute">+ {s.pageContexts.length - 2} more page{s.pageContexts.length > 3 ? "s" : ""}, same experience</p>
-        )}
+        {(() => {
+          const withShot = s.pageContexts.filter((c) => screenshot(c.pageId));
+          const shown = withShot.slice(0, 2);
+          const rest = s.pageContexts.filter((c) => !shown.includes(c));
+          return (
+            <>
+              {shown.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3">
+                  {shown.map((c) => (
+                    <figure key={c.pageId} className={shown.length === 1 ? "col-span-2" : ""}>
+                      <Shot pageId={c.pageId} className={`${shown.length === 1 ? "aspect-[16/10]" : "aspect-[4/5]"} rounded-lg border border-line shadow-sm`} />
+                      <figcaption className="mt-2 line-clamp-2 text-[12px] leading-snug text-ink-soft">“{editedText(d, `pageContext.${c.pageId}.startingHook`, c.startingHook)}”</figcaption>
+                    </figure>
+                  ))}
+                </div>
+              ) : null}
+              {rest.length > 0 && (
+                <ul className={`space-y-1.5 ${shown.length ? "mt-3" : ""}`}>
+                  {rest.slice(0, shown.length ? 3 : 5).map((c) => (
+                    <li key={c.pageId} className="rounded-lg bg-paper px-3 py-2 text-[12px] ring-1 ring-line">
+                      <span className="font-medium text-ink">{page(c.pageId)?.title}</span>
+                      <span className="block truncate text-ink-mute">“{editedText(d, `pageContext.${c.pageId}.startingHook`, c.startingHook)}”</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {s.pageContexts.length > 1 && <p className="mt-2 text-[12px] text-ink-mute">One experience on {s.pageContexts.length} pages, framed for each.</p>}
+            </>
+          );
+        })()}
       </div>
     </article>
   );
@@ -183,6 +214,12 @@ function ReviewDrawer({ s, onClose, onWhy }: { s: ExperienceSuggestion; onClose:
             <p className="text-[12px] text-ink-mute">For you</p>
             <p className="mt-0.5">{s.businessGoal}</p>
           </div>
+          {s.currentState && (
+            <div className="sm:col-span-2">
+              <p className="text-[12px] text-ink-mute">What your website does today</p>
+              <p className="mt-0.5">{s.currentState}</p>
+            </div>
+          )}
           <div className="sm:col-span-2">
             <p className="text-[12px] text-ink-mute">What happens next</p>
             <p className="mt-0.5">{s.whatHappensNext}{target ? ` → ${target.label}` : ""}</p>
@@ -235,6 +272,24 @@ function ReviewDrawer({ s, onClose, onWhy }: { s: ExperienceSuggestion; onClose:
                 </li>
               ))}
             </ul>
+          </section>
+        )}
+
+        {s.prerequisites.length > 0 && (
+          <section>
+            <h3 className="text-sm font-semibold">Before anything is built, you&apos;d confirm</h3>
+            <ul className="mt-2 space-y-1.5 text-[14px] text-ink-soft">
+              {s.prerequisites.map((q) => <li key={q} className="flex gap-2"><span className="text-go">✓</span>{q}</li>)}
+            </ul>
+          </section>
+        )}
+
+        {s.capabilityKeys.length > 0 && (
+          <section>
+            <h3 className="text-sm font-semibold">What it would use</h3>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {s.capabilityKeys.map((k) => <Chip key={k}>{capabilityText[k] ?? k.replace(/_/g, " ")}</Chip>)}
+            </div>
           </section>
         )}
 

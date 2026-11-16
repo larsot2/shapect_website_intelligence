@@ -14,7 +14,7 @@ export function HowItWorks() {
   const primary = bp.journeys.find((j) => j.primary) ?? bp.journeys[0];
   const others = bp.journeys.filter((j) => j !== primary);
   const keeps = bp.assetActions.filter((a) => a.proposal === "keep");
-  const keptAssets = [...new Map(keeps.map((k) => [k.assetId, k])).values()];
+  const keptAssets = [...new Map(keeps.map((k) => [k.assetId, k])).values()].slice(0, 4);
 
   return (
     <section aria-labelledby="how-title">
@@ -30,6 +30,22 @@ export function HowItWorks() {
           </div>
         )}
       </div>
+
+      {bp.visitorDecisions.length > 0 && (
+        <div className="mt-5 rounded-2xl border border-line bg-paper p-6">
+          <h3 className="text-sm font-semibold">What your visitors are trying to decide</h3>
+          <ul className="mt-4 grid gap-x-8 gap-y-3 md:grid-cols-2">
+            {bp.visitorDecisions.map((v) => (
+              <li key={v.decision} className="flex items-start justify-between gap-3 text-[14px]">
+                <span>{v.decision}</span>
+                <Chip tone={v.coverage === "covered" ? "go" : v.coverage === "partial" ? "amber" : "neutral"}>
+                  {v.coverage === "covered" ? "Well supported" : v.coverage === "partial" ? "Partly" : "Not yet"}
+                </Chip>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[1.2fr_1fr]">
         <div className="rounded-2xl border border-line bg-paper p-6">
@@ -48,14 +64,14 @@ export function HowItWorks() {
         </div>
 
         <div className="space-y-5">
-          <div className="rounded-2xl border border-go/20 bg-go-soft/50 p-6">
+          {keptAssets.length > 0 && <div className="rounded-2xl border border-go/20 bg-go-soft/50 p-6">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-go-ink"><CircleCheck className="size-4" aria-hidden /> Keep what works</h3>
             <ul className="mt-3 space-y-2 text-[14px]">
               {keptAssets.map((k) => (
                 <li key={k.id}><span className="font-medium">{asset(k.assetId)?.label}</span> <span className="text-ink-soft">— {k.rationale}</span></li>
               ))}
             </ul>
-          </div>
+          </div>}
           {bp.gateDecisions.length > 0 && (
             <div className="rounded-2xl border border-line bg-paper p-6">
               <h3 className="flex items-center gap-2 text-sm font-semibold"><CircleSlash className="size-4 text-ink-mute" aria-hidden /> What we deliberately don&apos;t suggest</h3>

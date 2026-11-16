@@ -28,7 +28,7 @@ export function Shot({ pageId, vp = "desktop", className = "", sizes = "320px", 
   }
   return (
     <div className={`relative overflow-hidden bg-canvas ${className}`}>
-      <Image src={shot.src} alt={`Screenshot of ${p?.title ?? pageId}`} fill sizes={sizes} priority={priority} className="object-cover object-top" />
+      <Image src={shot.src} alt={`Screenshot of ${p?.title ?? pageId}`} fill sizes={sizes} priority={priority} unoptimized={shot.src.startsWith("/api/")} className="object-cover object-top" />
     </div>
   );
 }

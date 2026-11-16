@@ -44,7 +44,7 @@ export const proposalLabel = {
   keep: "Keep",
   replace: "Replace",
   redirect: "Redirect",
-  connect: "Connect",
+  bridge: "Bridge",
   remove: "Remove",
 } as const;
 

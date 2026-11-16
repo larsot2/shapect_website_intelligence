@@ -183,6 +183,10 @@ export const ExperienceSuggestionSchema = z.object({
   customerNeed: shortText,
   businessGoal: shortText,
   whatHappensNext: shortText,
+  /** What the website already does for this decision today. */
+  currentState: shortText.optional(),
+  /** What the owner must confirm before this could ever be built. */
+  prerequisites: z.array(shortText).default([]),
   supportedRecipeKey: z.string().optional(),
   capabilityKeys: z.array(z.string()),
   pageContexts: z.array(z.object({ pageId: id, perspective: z.string().optional(), startingHook: z.string().max(140) })).min(1),
@@ -209,7 +213,8 @@ export const AssetActionSchema = z.object({
   id,
   assetId: id,
   pageId: id,
-  proposal: z.enum(["keep", "replace", "redirect", "connect", "remove"]),
+  /** bridge = route this CTA into a suggested experience before the existing destination (proposal only). */
+  proposal: z.enum(["keep", "replace", "redirect", "bridge", "remove"]),
   rationale: shortText,
   relatedSuggestionId: id.optional(),
 });
@@ -291,5 +296,28 @@ export const BlueprintSchema = z.object({
     skippedPageCount: z.number().int().nonnegative(),
     limitations: z.array(z.string()),
   }),
+  /** Run metrics for transparency (cost, duration, errors). */
+  run: z.object({
+    durationMs: z.number().nonnegative(),
+    discoveredUrls: z.number().int().nonnegative(),
+    fetchedPages: z.number().int().nonnegative(),
+    httpRequests: z.number().int().nonnegative(),
+    httpCacheHits: z.number().int().nonnegative(),
+    renderedPages: z.number().int().nonnegative(),
+    capturedPages: z.number().int().nonnegative(),
+    llmCalls: z.number().int().nonnegative(),
+    llmCacheHits: z.number().int().nonnegative(),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    tokensEstimated: z.boolean(),
+    networkMode: z.string(),
+    warnings: z.array(z.string()),
+  }).optional(),
+  /** Customer decisions visitors try to make, with how well the site supports them. */
+  visitorDecisions: z.array(z.object({
+    decision: z.string(),
+    pageIds: z.array(id),
+    coverage: z.enum(["covered", "partial", "none"]),
+  })).default([]),
 });
 export type Blueprint = z.infer<typeof BlueprintSchema>;

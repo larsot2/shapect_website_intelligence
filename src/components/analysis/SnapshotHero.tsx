@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ArrowDown, MonitorSmartphone } from "lucide-react";
+import { RescanButton } from "./RescanButton";
 import { useAnalysis } from "./AnalysisContext";
 import { Shot } from "./Shot";
 
@@ -22,7 +23,10 @@ export function SnapshotHero() {
       <div className="order-2 lg:order-1">
         <p className="text-[13px] font-medium text-go">Your website, understood.</p>
         <h1 className="mt-2 text-[34px] leading-[1.1] font-semibold tracking-tight sm:text-[44px]">{bp.website.businessName}</h1>
-        <p className="mt-1 text-sm text-ink-mute">{host}</p>
+        <p className="mt-1 text-sm text-ink-mute">
+          {host}
+          {bp.source.kind === "scan" && <> · analysed {new Date(bp.analysis.finishedAt).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}</>}
+        </p>
         <p className="mt-5 max-w-[540px] text-[17px] leading-relaxed text-ink-soft">{bp.website.summary}</p>
 
         <dl className="mt-7 flex flex-wrap gap-x-8 gap-y-4">
@@ -42,6 +46,7 @@ export function SnapshotHero() {
           <Link href={`${base}/preview`} className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-line bg-paper px-4 text-sm font-medium hover:border-ink-mute">
             <MonitorSmartphone className="size-4" aria-hidden /> Website preview
           </Link>
+          {bp.source.kind === "scan" && <RescanButton url={bp.website.url} />}
         </div>
       </div>
 

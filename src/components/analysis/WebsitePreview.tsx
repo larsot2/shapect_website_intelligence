@@ -17,6 +17,7 @@ type Marker =
 
 const groupOrder = ["home", "services", "design", "costs", "contact", "trust", "other"] as const;
 const groupLabel = { home: "Home", services: "Services", design: "Design", costs: "Costs", contact: "Contact", trust: "Trust", other: "Other" };
+const placementLabel = (p: string) => ({ header: "in the header", nav: "in the menu", main: "in the page", footer: "in the footer", hero: "in the hero", "footer-band": "near the bottom", "end-of-article": "end of article" } as Record<string, string>)[p] ?? p;
 const MARKED_KINDS = new Set(["cta_link", "contact_form", "multi_step_form", "calculator", "booking", "phone"]);
 
 export function WebsitePreview() {
@@ -41,10 +42,14 @@ export function WebsitePreview() {
     let n = 0;
     for (const a of bp.conversionAssets) {
       if (!MARKED_KINDS.has(a.kind)) continue;
-      for (const o of a.occurrences) {
+      let perAsset = 0;
+      const occs = [...a.occurrences].sort((x, y) => (["main", "hero"].includes(x.placement) ? -1 : 0) - (["main", "hero"].includes(y.placement) ? -1 : 0));
+      for (const o of occs) {
         if (o.pageId !== pageId) continue;
         const bbox = o.bboxes.find((b) => b.viewport === vp);
         if (!bbox) continue;
+        // keep overlays calm: phone/email once per page, other assets at most twice
+        if (++perAsset > (a.kind === "phone" || a.kind === "email" ? 1 : 2)) continue;
         out.push({ kind: "asset", key: `asset:${a.id}:${o.placement}`, assetId: a.id, placement: o.placement, bbox, n: ++n,
           action: bp.assetActions.find((x) => x.assetId === a.id && x.pageId === pageId) });
       }
@@ -126,7 +131,7 @@ export function WebsitePreview() {
               <span className="ml-2 truncate rounded-md bg-canvas px-3 py-0.5 text-[11px] text-ink-mute">{page(pageId)?.url}</span>
             </div>
             <div ref={stage} className="relative" style={{ aspectRatio: `${shot.width} / ${shot.height}` }}>
-              <Image src={shot.src} alt={`Screenshot of ${page(pageId)?.title} (${vp})`} fill sizes="(min-width: 1024px) 800px, 100vw" className="object-cover object-top" priority />
+              <Image src={shot.src} alt={`Screenshot of ${page(pageId)?.title} (${vp})`} fill sizes="(min-width: 1024px) 800px, 100vw" unoptimized={shot.src.startsWith("/api/")} className="object-cover object-top" priority />
               {markers.map((m) => (
                 <MarkerBox key={m.key} m={m} w={shot.width} h={shot.height} selected={m.key === selectedKey}
                   onSelect={() => setParams({ marker: m.key === selectedKey ? null : m.key })} />
@@ -213,7 +218,7 @@ function PageSummary({ markers, unverified, onSelect }: {
               <button type="button" onClick={() => onSelect(m.key)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-canvas">
                 <span className="grid size-5 shrink-0 place-items-center rounded-full bg-sky text-[11px] font-semibold text-white">{m.n}</span>
                 <span className="truncate">{asset(m.assetId)?.label}</span>
-                <span className="ml-auto shrink-0 text-[11px] text-ink-mute">{m.placement}</span>
+                <span className="ml-auto shrink-0 text-[11px] text-ink-mute">{placementLabel(m.placement)}</span>
               </button>
             </li>
           ))}
@@ -265,7 +270,7 @@ function AssetDetail({ m }: { m: Extract<Marker, { kind: "asset" }> }) {
         <span className="grid size-6 place-items-center rounded-full bg-sky text-[12px] font-semibold text-white">{m.n}</span>
         <h2 className="font-semibold">{a.label}</h2>
       </div>
-      <Step label="What exists">{assetKindLabel[a.kind]} · {m.placement}{a.siteWide ? " · on every page" : ""}</Step>
+      <Step label="What exists">{assetKindLabel[a.kind]} · {placementLabel(m.placement)}{a.siteWide ? " · on most pages" : ""}{a.fields?.length ? <span className="mt-1 block text-[13px] text-ink-mute">Asks for: {a.fields.slice(0, 8).map((f) => f.replace(/\s*\(.*\)$/, "")).join(", ")}</span> : null}</Step>
       <Step label="What we suggest">
         {action ? (
           <>

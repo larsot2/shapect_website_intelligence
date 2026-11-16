@@ -94,6 +94,7 @@ export function referenceErrors(bp: Blueprint): string[] {
     // Connections are planning only in V1: never "active".
     evidence(c.evidence, `connection ${c.id}`);
   });
+  bp.visitorDecisions.forEach((v, i) => v.pageIds.forEach((p) => page(p, `visitorDecision ${i}`)));
   bp.unsupportedOpportunities.forEach((o) => evidence(o.evidence, `opportunity ${o.id}`));
   bp.gateDecisions.forEach((g) => evidence(g.evidence, `gate ${g.id}`));
   return errors;

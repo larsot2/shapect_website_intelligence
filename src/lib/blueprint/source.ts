@@ -1,6 +1,7 @@
 import "server-only";
 import { validateBlueprint, type ValidationResult } from "./validate";
 import northwind from "../../../fixtures/blueprints/northwind.blueprint.json";
+import { isScanId, listJobs, readBlueprint } from "../analyzer/store";
 
 /**
  * The UI never knows where a blueprint comes from. Every source returns raw
@@ -39,7 +40,20 @@ export const fixtureSource: BlueprintSource = {
   },
 };
 
-const sources: BlueprintSource[] = [fixtureSource];
+/** Snapshots written by the analyzer (data/scans/<id>/blueprint.json). */
+export const scanSnapshotSource: BlueprintSource = {
+  async list() {
+    const jobs = await listJobs();
+    return jobs
+      .filter((j) => j.status === "done" || j.status === "partial")
+      .map((j) => ({ scanId: j.scanId, businessName: j.businessName ?? new URL(j.url).hostname, url: new URL(j.url).hostname.replace(/^www\./, ""), kind: "scan" as const, note: j.finishedAt }));
+  },
+  async get(scanId) {
+    return isScanId(scanId) ? readBlueprint(scanId) : null;
+  },
+};
+
+const sources: BlueprintSource[] = [scanSnapshotSource, fixtureSource];
 
 export async function listBlueprints(): Promise<BlueprintSummary[]> {
   return (await Promise.all(sources.map((s) => s.list()))).flat();

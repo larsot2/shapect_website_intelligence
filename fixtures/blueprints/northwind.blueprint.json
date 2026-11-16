@@ -1362,7 +1362,7 @@
       "id": "aa-cost-end-cta",
       "assetId": "cta-book-consultation",
       "pageId": "cost-guide",
-      "proposal": "connect",
+      "proposal": "bridge",
       "rationale": "Offer the planner beside this button, so readers who aren't ready to book still have a next step.",
       "relatedSuggestionId": "sx-project-planner"
     },

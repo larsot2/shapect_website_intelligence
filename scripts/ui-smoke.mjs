@@ -15,6 +15,7 @@ const SHOTS = process.env.SMOKE_SHOTS;
 if (SHOTS) await mkdir(SHOTS, { recursive: true });
 
 const assert = (cond, msg) => { if (!cond) throw new Error(`SMOKE FAIL: ${msg}`); console.log(`  ✓ ${msg}`); };
+const visible = async (locator, ms = 6000) => locator.first().waitFor({ state: "visible", timeout: ms }).then(() => true, () => false);
 const shot = async (page, name) => SHOTS && page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: false });
 
 const browser = await chromium.launch();
@@ -25,9 +26,14 @@ try {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
 
+  // reset stored review decisions for the fixture so the run is repeatable
+  await fetch(`${BASE}/api/reviews/fixture-northwind`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ scanId: "fixture-northwind", snapshotVersion: "fixture-2026-11-16.1", decisions: {} }) });
+
   await page.goto(`${BASE}/studio/website`);
   assert(await page.getByRole("heading", { name: /understand your website/i }).isVisible(), "start screen renders");
-  assert(await page.getByRole("button", { name: "Analyse website" }).isDisabled(), "live scan button honestly disabled");
+  await page.getByLabel("Your website address").fill("example.com.au");
+  await page.getByRole("button", { name: /Analyse website/ }).click();
+  assert(await page.getByText(/confirm you're allowed/i).isVisible(), "scan requires the permission confirmation");
   await page.getByRole("link", { name: /Northwind Bathrooms/ }).click();
   await page.waitForURL(/fixture-northwind$/);
   assert(await page.getByText("Demo fixture").first().isVisible(), "fixture is clearly labelled");
@@ -59,9 +65,9 @@ try {
   await shot(page, "04-connections");
 
   await page.reload();
-  assert(await page.getByTestId("card-sx-project-planner").getByText("Confirmed with your edits").isVisible(), "decision survives reload");
-  assert(await page.getByTestId("card-sx-style-explorer").getByText("marked as not for you").isVisible(), "rejection survives reload");
-  assert(await page.getByTestId("claim-c-region").getByText("Confirmed by you").isVisible(), "claim decision survives reload");
+  assert(await visible(page.getByTestId("card-sx-project-planner").getByText("Confirmed with your edits")), "decision survives reload");
+  assert(await visible(page.getByTestId("card-sx-style-explorer").getByText("marked as not for you")), "rejection survives reload");
+  assert(await visible(page.getByTestId("claim-c-region").getByText("Confirmed by you")), "claim decision survives reload");
 
   await page.goto(`${BASE}/studio/website/fixture-northwind/preview?page=small&marker=tp-small-midpage`);
   assert(await page.getByRole("button", { name: /Suggested: Bathroom Project Planner/ }).isVisible(), "touchpoint overlay on screenshot");
@@ -72,6 +78,16 @@ try {
   await page.getByRole("radio", { name: /Keep/ }).click();
   assert(await page.getByText("Your choice saved").isVisible(), "asset action changed by user");
   await shot(page, "06-preview-asset");
+  // optional: the newest real scan renders with real screenshots
+  const scans = await (await fetch(`${BASE}/api/scans`)).json();
+  const real = scans.find((x) => x.status === "done");
+  if (real) {
+    await page.goto(`${BASE}/studio/website/${real.scanId}`);
+    assert(await page.getByRole("heading", { name: "What we recommend" }).isVisible(), `real scan renders (${real.businessName})`);
+    await page.goto(`${BASE}/studio/website/${real.scanId}/preview`);
+    assert(await page.locator("img[alt^='Screenshot of']").first().isVisible(), "real screenshot shown in preview");
+    await shot(page, "09-real-preview");
+  }
   assert(errors.length === 0, `no page errors (${errors.join("; ")})`);
   await ctx.close();
 
