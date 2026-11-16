@@ -23,14 +23,16 @@ export function ConnectionMap() {
 
   const visible = bp.suggestedExperiences.filter((s) => decisionFor("suggestion", s.id)?.status !== "rejected");
   const visibleIds = new Set(visible.map((s) => s.id));
-  const pageIds = [...new Set(visible.flatMap((s) => s.pageContexts.map((c) => c.pageId)))];
+  const allPageIds = [...new Set(visible.flatMap((s) => s.pageContexts.map((c) => c.pageId)))];
+  const pageIds = allPageIds.slice(0, 6);
+  const morePages = allPageIds.length - pageIds.length;
   const connections = bp.suggestedConnections.filter(
     (c) => visibleIds.has(c.fromSuggestionId) && (c.to.kind === "existing_asset" || visibleIds.has(c.to.id)),
   );
   const destIds = [...new Set(connections.filter((c) => c.to.kind === "existing_asset").map((c) => c.to.id))];
 
   const edges: Edge[] = [
-    ...visible.flatMap((s) => s.pageContexts.map((c) => ({ from: `p:${c.pageId}`, to: `s:${s.id}`, style: "page" as const }))),
+    ...visible.flatMap((s) => s.pageContexts.filter((c) => pageIds.includes(c.pageId)).map((c) => ({ from: `p:${c.pageId}`, to: `s:${s.id}`, style: "page" as const }))),
     ...connections.map((c) => ({
       from: `s:${c.fromSuggestionId}`,
       to: c.to.kind === "suggestion" ? `s:${c.to.id}` : `a:${c.to.id}`,
@@ -100,6 +102,7 @@ export function ConnectionMap() {
             {pageIds.map((p) => (
               <div key={p} data-node={`p:${p}`} className="rounded-lg border border-line bg-canvas/60 px-3 py-2 text-[13px] font-medium">{page(p)?.title}</div>
             ))}
+            {morePages > 0 && <p className="px-1 text-[12px] text-ink-mute">+ {morePages} more page{morePages > 1 ? "s" : ""}</p>}
           </Column>
           <Column title="Suggested experiences">
             {visible.map((s) => (
