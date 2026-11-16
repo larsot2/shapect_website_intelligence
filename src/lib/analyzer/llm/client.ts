@@ -309,7 +309,7 @@ export async function completeJson<T>(o: CompleteOptions<T>): Promise<T> {
         break;
       } catch (e) {
         const pe = e as ProviderError;
-        const transient = pe.status === 429 || pe.status === 502 || pe.status === 503 || pe.status === 504 || /ECONNRESET|socket|timeout|abort/i.test(pe.message ?? "");
+        const transient = pe.status === 429 || pe.status === 502 || pe.status === 503 || pe.status === 504 || /ECONNRESET|socket|timeout|abort|fetch failed|ETIMEDOUT|EAI_AGAIN|UND_ERR/i.test(`${pe.message ?? ""} ${(pe as { cause?: { code?: string } }).cause?.code ?? ""}`);
         if (!transient || retries >= 3) {
           record(null, { inputBytes, latencyMs: Date.now() - t0, retries, valid: false, estimated: true, costUsd: null, inputTokens: null, outputTokens: null });
           o.usage.failures.push(`${o.task}: ${pe.message ?? "provider error"}`);
