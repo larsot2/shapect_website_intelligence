@@ -287,10 +287,45 @@ export async function analyze(c: Collected, o: AnalyzeOptions): Promise<{ bluepr
     }
   }
 
-  const bp = assemble({ scanId: o.scanId, c, understanding, strategy, captures, evidence, usage: o.usage, stats: o.stats, warnings: o.warnings, t0: o.t0 });
+  const raw = assemble({ scanId: o.scanId, c, understanding, strategy, captures, evidence, usage: o.usage, stats: o.stats, warnings: o.warnings, t0: o.t0 });
+  const names = new Map<string, string>([...raw.pages.map((p) => [p.id, `“${p.title}”`] as const), ...raw.conversionAssets.map((a) => [a.id, `“${a.label}”`] as const)]);
+  const bp = stripEvidenceIds(raw, "", names);
   const v = validateBlueprint(bp);
   if (!v.ok) throw new Error(`Blueprint failed validation: ${v.errors.slice(0, 3).join("; ")}`);
   return { blueprint: v.blueprint, understanding, strategy, evidence, understandingOk: !!understanding, strategyOk: !!strategy };
+}
+
+const ID_LIST = String.raw`E\d{1,4}(?:(?:\s*,\s*|\s+and\s+|\s*&\s*)E\d{1,4})*`;
+/** Internal evidence ids (E12) are for the model only — remove them from owner-facing prose. Verbatim evidence stays untouched. */
+export function stripIds(t: string): string {
+  return t
+    .replace(new RegExp(String.raw`\s*\((?:see |per |cf\. )?${ID_LIST}\)`, "g"), "")
+    .replace(new RegExp(String.raw`\b(in|by|from|per|see|under)\s+${ID_LIST}\b`, "g"), "on your website")
+    .replace(new RegExp(String.raw`\b${ID_LIST}\b`, "g"), "what your website says")
+    .replace(/\s+([.,;:])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/** Prose fields only: ids, keys and verbatim evidence are left alone. */
+const NON_PROSE = /^(id|.*Id|.*Ids|key|.*Key|.*Keys|url|path|evidence|quote|kind|group|status|mode|action|proposal|support|scanId)$/;
+
+/** Internal ids (E12, asset/page ids like "multi-step-form-form-continue") are for the model — owner-facing prose gets names instead. */
+export function stripEvidenceIds<T>(v: T, key = "", names: Map<string, string> = new Map()): T {
+  if (key && NON_PROSE.test(key)) return v;
+  if (typeof v === "string") {
+    let t = /\bE\d{1,4}\b/.test(v) ? stripIds(v) : v;
+    if (names.size && /[a-z0-9]-[a-z0-9]/.test(t) && t.includes(" "))
+      t = t.replace(/\(?\b[a-z0-9]+(?:-[a-z0-9]+)+\b\)?/g, (m) => {
+        const id = m.replace(/^\(|\)$/g, "");
+        const n = names.get(id);
+        return n ? (m.startsWith("(") ? `(${n})` : n) : m;
+      });
+    return t as T;
+  }
+  if (Array.isArray(v)) return v.map((x) => stripEvidenceIds(x, key, names)) as T;
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, stripEvidenceIds(x, k, names)])) as T;
+  return v;
 }
 
 function humanError(e: Error): string {

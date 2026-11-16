@@ -15,6 +15,13 @@ const mech: Record<Mechanism, { label: string; Icon: typeof Lock }> = {
   touchpoints: { label: "Same experience, several pages", Icon: MapPin },
 };
 
+const modeText: Record<NonNullable<ConnectionSuggestion["mode"]>, { label: string; hint: string }> = {
+  session_reuse: { label: "Reuses answers within the same visit", hint: "Both experiences read the same answers while the visitor is on your site." },
+  explicit_bridge: { label: "Hands answers over (needs a bridge)", hint: "Answers would be passed on explicitly, only after you approve it." },
+  external_link: { label: "Link only — answers are not passed on", hint: "The visitor continues to your existing form and may have to answer again." },
+  manual_summary: { label: "Visitor takes a summary along", hint: "The visitor gets a summary to bring along; nothing is transferred." },
+};
+
 /**
  * Network view for owners: experiences (with where they appear) on the left,
  * the business's existing process on the right. Dashed = bridge between
@@ -155,6 +162,8 @@ function ConnectionCard({ c, active, onFocus, onBlur }: { c: ConnectionSuggestio
       </div>
       <p className="mt-1.5 text-[15px] font-semibold">{from} <span className="text-ink-mute">→</span> {to}</p>
       <p className="mt-1 line-clamp-2 text-[13px] text-ink-soft">{c.rationale}</p>
+      {c.mode && <p className="mt-1.5 text-[12px] font-medium text-ink-soft" title={modeText[c.mode].hint}>{modeText[c.mode].label}</p>}
+      {c.unavailableFields.length > 0 && <p className="mt-1 text-[12px] text-ink-mute">Not passed on: {c.unavailableFields.join(", ")}</p>}
 
       {(st.carry.length > 0 || st.missing.length > 0) && (
         <div className="mt-3 flex flex-wrap gap-1.5 text-[12px]">

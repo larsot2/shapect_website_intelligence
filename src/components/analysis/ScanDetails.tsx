@@ -79,7 +79,7 @@ export function ScanDetails({ embedded = false }: { embedded?: boolean }) {
                 [bp.diagnostics.scannedPageCount, "read closely"],
                 [bp.run.capturedPages, "captured"],
                 [bp.run.llmCalls, bp.run.llmCalls === 1 ? "AI call" : "AI calls"],
-                [`${bp.run.tokensEstimated ? "~" : ""}${Math.round((bp.run.inputTokens + bp.run.outputTokens) / 1000)}k`, "tokens"],
+                [`${bp.run.tokensEstimated ? "~" : ""}${Math.round((bp.run.inputTokens + bp.run.outputTokens) / 1000)}k`, bp.run.costUsd != null ? `tokens · $${bp.run.costUsd.toFixed(3)}` : "tokens"],
                 [`${Math.floor(bp.run.durationMs / 60000)}:${String(Math.round((bp.run.durationMs % 60000) / 1000)).padStart(2, "0")}`, "minutes"],
               ].map(([v, l]) => (
                 <div key={String(l)}>

@@ -7,7 +7,7 @@ import { extractSignals } from "@/lib/analyzer/extract";
 import { applyEntryGates, contextFidelity, type GateContext } from "@/lib/analyzer/gates";
 import type { StrategyEntry } from "@/lib/analyzer/llm/schemas";
 import { sameBrand } from "@/lib/analyzer/inventory";
-import { normaliseContexts } from "@/lib/analyzer/pipeline";
+import { normaliseContexts, stripEvidenceIds } from "@/lib/analyzer/pipeline";
 import type { Understanding } from "@/lib/analyzer/llm/schemas";
 import { extractJson } from "@/lib/analyzer/llm/client";
 
@@ -117,6 +117,17 @@ describe("V2 gates", () => {
     // naming a context in an opportunity is not coverage; copy-only contexts ride on the common flow
     expect(f.notes.map((n) => n.label)).toEqual(["Granny flat", "Luxury"]);
     expect(f.addressedBy.get("townhouse")?.[0]).toMatch(/common flow/);
+  });
+
+  it("removes internal evidence ids from prose but keeps verbatim evidence", () => {
+    const r = stripEvidenceIds({ a: "Static forms (E34, E120) ask for services.", b: "The approval process mentioned in E135.", c: "Directly addresses E92 and E179 regarding strata.", evidence: [{ quote: "Bus E12 stops here" }] });
+    expect(r.a).toBe("Static forms ask for services.");
+    expect(r.b).toBe("The approval process mentioned on your website.");
+    expect(r.c).not.toMatch(/E\d/);
+    expect(r.evidence[0].quote).toBe("Bus E12 stops here");
+    const n = stripEvidenceIds({ currentState: "A multi-step form (multi-step-form-continue) asks for budget.", targetId: "multi-step-form-continue" }, "", new Map([["multi-step-form-continue", "“Continue”"]]));
+    expect(n.currentState).toBe("A multi-step form (“Continue”) asks for budget.");
+    expect(n.targetId).toBe("multi-step-form-continue");
   });
 
   it("normalises scope and recognises sister domains", () => {
