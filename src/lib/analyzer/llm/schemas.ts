@@ -35,6 +35,8 @@ export const ContextSchema = z.object({
   conversionGoalAssetId: z.string().optional().nullable(),
   support: z.enum(["supported", "partial", "unsupported", "owner_review"]).catch("owner_review"),
   differsBy: z.enum(["copy", "questions", "capability", "conversion", "unsupported"]).catch("questions"),
+  /** what kind of dimension this is — services, property types and perspectives overlap, they are not all "services" */
+  dimension: z.enum(["service", "property_type", "perspective", "room", "combination", "readiness", "segment", "other"]).catch("other").optional(),
   evidenceIds: ids(6),
 });
 export type ContextOut = z.infer<typeof ContextSchema>;
@@ -99,6 +101,26 @@ export const UnderstandingSchema = z.object({
     })).min(2).transform((a) => a.slice(0, 6)),
   }), 3).default([]),
   contexts: upTo(ContextSchema, 9).default([]),
+  /** specific content objects that could become starting points (a project example, a gallery category, a price article …) */
+  contentAssets: upTo(z.object({
+    id: z.string().transform((v) => v.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").slice(0, 40)),
+    pageId: z.string(),
+    kind: z.enum(["gallery", "project_example", "before_after", "article", "price_guide", "package", "faq", "testimonial", "design_service", "other"]).catch("other"),
+    label: s(80),
+    whatItShows: s(180),
+    evidenceIds: ids(3),
+  }), 8).default([]),
+  /** observable quality of existing tools/forms/CTAs — never claims about accuracy that can't be observed */
+  assetReviews: upTo(z.object({
+    assetId: z.string(),
+    strengths: upTo(s(150), 3).default([]),
+    weaknesses: upTo(s(150), 3).default([]),
+    contextFit: z.enum(["fits", "mismatch", "unknown"]).catch("unknown"),
+    contextNote: optText(180),
+    evidenceIds: ids(3),
+  }), 8).default([]),
+  /** buying-readiness stages the site itself distinguishes (e.g. timeframe options in a form) */
+  readinessSignals: upTo(s(140), 5).default([]),
   uncertainties: upTo(s(200), 5).default([]),
   followUpRequests: upTo(z.object({ id: z.string(), missing: s(160) }), 3).default([]),
 });
@@ -130,23 +152,60 @@ export const StrategySchema = z.object({
     id: z.string(),
     label: s(60),
     contextIds: ids(6),
-    decisionGap: s(200),
-    action: z.enum(["add", "improve", "connect", "reposition", "none"]).catch("add"),
+    sourcePageIds: ids(4),
+    sourceAssetIds: ids(3),
+    sourceContentIds: ids(3),
+    stage: z.enum(["explore", "consider", "plan", "ready"]).optional().catch(undefined),
+    observedSignal: optText(220),
+    visitorIntent: optText(180),
+    decisionGap: s(220),
+    existingCoverage: optText(180),
+    transformation: optText(240),
+    interactionType: z.enum(["guided_questions", "visual_choice", "comparison", "checklist", "contextual_guide", "brief_builder", "inspiration_to_project", "upload_assist", "invitation", "tool_improvement", "other"]).optional().catch(undefined),
+    minimumIntervention: optText(200),
+    richerAlternative: optText(200),
+    value: z.enum(["high", "medium", "low"]).optional().catch(undefined),
+    readiness: z.enum(["ready", "conditional", "future"]).optional().catch(undefined),
+    requirements: upTo(s(140), 4).optional(),
+    assumptions: upTo(s(140), 3).optional(),
+    evidenceIds: ids(4),
+    action: z.enum(["add", "improve", "replace", "complement", "connect", "reposition", "invite", "none"]).catch("add"),
     support: z.enum(["supported", "partial", "unsupported", "owner_review"]).catch("owner_review"),
     note: optText(200),
   }), 12).default([]),
-  recommendationCount: z.object({ count: z.number().int().min(0).max(3).catch(0), rationale: s(300) }),
+  architecture: z.object({
+    alternatives: upTo(z.object({ key: z.string(), label: s(60), fit: z.enum(["strong", "partial", "weak"]).catch("partial"), why: s(220) }), 6).default([]),
+    chosen: s(200),
+    rationale: s(400),
+    motivations: upTo(z.preprocess((v) => (v && typeof v === "object" ? { ...(v as Record<string, unknown>), entry: (v as Record<string, unknown>).entry ?? (v as Record<string, unknown>)["entry (label)"] } : v),
+      z.object({ motivation: s(80), pageIds: ids(4), servedBy: z.enum(["path", "own_entry", "invitation", "tool_improvement", "copy_only", "none"]).catch("none"), entry: optText(48), note: s(200) })), 10).default([]),
+  }).optional().catch(undefined),
+  recommendationCount: z.object({ count: z.number().int().min(0).max(5).catch(0), rationale: s(300) }),
   entries: upTo(z.object({
     label: s(48),
     opportunityIds: ids(6),
     frictionIds: ids(4),
-    action: z.enum(["add", "improve", "connect", "reposition", "none"]).catch("add"),
+    role: z.enum(["main", "supporting", "invitation", "tool_improvement"]).optional().catch(undefined),
+    priority: z.number().int().min(1).max(9).optional().catch(undefined),
+    stages: upTo(z.enum(["explore", "consider", "plan", "ready"]), 4).optional().catch(undefined),
+    interactionType: z.enum(["guided_questions", "visual_choice", "comparison", "checklist", "contextual_guide", "brief_builder", "inspiration_to_project", "upload_assist", "invitation", "tool_improvement", "other"]).optional().catch(undefined),
+    motivation: optText(200),
+    promise: optText(200),
+    decisionsResolved: upTo(s(160), 4).optional(),
+    outcome: optText(220),
+    readiness: z.enum(["ready", "conditional", "future"]).optional().catch(undefined),
+    requirements: upTo(s(160), 5).optional(),
+    whyNotSimpler: optText(220),
+    whyNotMoreComplex: optText(220),
+    specificToBusiness: optText(240),
+    sourceContentIds: ids(4),
+    action: z.enum(["add", "improve", "replace", "complement", "connect", "reposition", "invite", "none"]).catch("add"),
     headline: s(160),
     businessOutcome: s(200),
     visitorOutcome: s(200),
     currentState: s(200),
     coverageGap: s(200),
-    capabilityKeys: z.array(z.string()).min(1).transform((a) => a.slice(0, 7)),
+    capabilityKeys: z.array(z.string()).default([]).transform((a) => a.slice(0, 7)),
     support: z.enum(["supported", "partial", "unsupported", "owner_review"]).catch("partial"),
     consolidationRationale: s(260),
     commonFlow: upTo(z.object({ title: s(48), detail: s(140) }), 4).default([]),
@@ -183,26 +242,51 @@ export const StrategySchema = z.object({
     riskFlags: upTo(s(160), 3).default([]),
     complexity: z.enum(["low", "medium", "high"]).catch("medium"),
     confidence: z.number().min(0).max(1).catch(0.5),
-  }), 4).default([]),
+  }), 6).default([]),
   assetActions: upTo(z.object({
     assetId: z.string(),
     pageId: z.string(),
-    proposal: z.enum(["keep", "replace", "redirect", "bridge", "remove"]).catch("keep"),
+    proposal: z.enum(["keep", "improve", "reposition", "replace", "redirect", "bridge", "remove"]).catch("keep"),
     rationale: s(220),
     relatedEntry: optText(48),
   }), 8).default([]),
-  connections: upTo(z.object({
+  connections: upTo(z.preprocess((v) => {
+    if (!v || typeof v !== "object") return v;
+    const o = v as Record<string, unknown>;
+    return { ...o, from: o.from ?? o.fromEntry ?? o["from (entry label)"] ?? o.source ?? o.sourceEntry };
+  }, z.object({
     from: z.string(),
     toEntry: optText(48),
     toAssetId: z.string().optional().nullable(),
     mode: z.enum(["session_reuse", "explicit_bridge", "external_link", "manual_summary"]).catch("external_link"),
     reason: s(220),
+    motivation: optText(200),
+    conditions: upTo(s(160), 3).optional(),
     sharedFieldKeys: ids(6),
     missingFieldKeys: ids(6),
     constraints: upTo(s(180), 3).default([]),
     feasibility: z.enum(["possible", "needs_review", "not_supported"]).catch("needs_review"),
-  }), 6).default([]),
+  })), 6).default([]),
   notSuggested: upTo(z.object({ label: s(60), note: s(220) }), 5).default([]),
 });
 export type Strategy = z.infer<typeof StrategySchema>;
+
+// ---------------------------------------------------------------- Critic (a different model reviews the strategy)
+
+const score = z.number().int().min(1).max(5).catch(3);
+export const CritiqueSchema = z.object({
+  summary: s(500),
+  architectureNote: optText(300),
+  entries: upTo(z.preprocess((v) => (v && typeof v === "object" ? { ...(v as Record<string, unknown>), label: (v as Record<string, unknown>).label ?? (v as Record<string, unknown>).entry } : v), z.object({
+    label: z.string(),
+    rank: z.number().int().min(1).max(9).catch(9),
+    verdict: z.enum(["strong", "keep_with_changes", "weak", "reject"]).catch("weak"),
+    scores: z.object({ specificity: score, usefulness: score, creativity: score, evidence: score, feasibility: score, simplicity: score, nonRedundancy: score }).partial().default({}),
+    issues: upTo(s(220), 4).default([]),
+    fix: optText(240),
+  })), 6).default([]),
+  opportunities: upTo(z.object({ id: z.string(), verdict: z.enum(["promote", "keep", "drop"]).catch("keep"), note: optText(200) }), 12).default([]),
+  missed: upTo(z.object({ label: s(70), why: s(260), evidenceIds: ids(3) }), 3).default([]),
+});
+export type Critique = z.infer<typeof CritiqueSchema>;
 export type StrategyEntry = Strategy["entries"][number];

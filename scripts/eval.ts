@@ -33,7 +33,7 @@ for (const site of sites) {
   await saveJob(job);
   const outDir = path.join(config.dataDir, "eval", variant);
   await fs.mkdir(outDir, { recursive: true });
-  await fs.writeFile(path.join(outDir, `${site}.json`), JSON.stringify({ site, scanId, usage, understanding: res.understanding, strategy: res.strategy, blueprint: res.blueprint }, null, 1));
+  await fs.writeFile(path.join(outDir, `${site}.json`), JSON.stringify({ site, scanId, usage, understanding: res.understanding, strategy: res.strategy, trail: res.trail, blueprint: res.blueprint }, null, 1));
   total += usage.costUsd;
   const bp = res.blueprint as typeof res.blueprint & { contexts?: unknown[] };
   console.log(`\n=== ${site} (${variant}) ${job.status} · ${usage.calls} calls · in ${usage.inputTokens} · out ${usage.outputTokens} · reasoning ${usage.reasoningTokens} · $${usage.costUsd.toFixed(4)}${usage.costKnown ? "" : " (partly unknown)"} · ${Math.round((Date.now() - t0) / 1000)}s`);

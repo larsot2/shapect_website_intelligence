@@ -49,6 +49,7 @@ export function Recommendations() {
           </ul>
         )}
       </div>
+      <StrategyOverview />
       {list.length === 0 && incompleteParts(bp).recommendations ? (
         <div className="rounded-2xl border border-dashed border-line bg-paper/60 p-8">
           <p className="text-lg font-semibold">No recommendations yet.</p>
@@ -105,10 +106,16 @@ function RecommendationCard({ s, index, onReview, onWhy }: { s: ExperienceSugges
         <div className="flex flex-wrap items-center gap-2">
           <span title={pr.hint}><Chip tone={pr.tone} className="font-semibold">{index === 0 && pr.tone === "go" ? "★ " : ""}{pr.label}</Chip></span>
           <span title={actionHint[s.action]}><Chip><ActionIcon className="size-3" aria-hidden /> {actionLabel[s.action]}</Chip></span>
+          {s.role && <Chip tone={s.role === "main" ? "go" : "neutral"}>{roleText[s.role]}</Chip>}
+          {s.stages.length > 0 && <span title="Where in the customer journey this catches visitors"><Chip>{s.stages.map((x) => stageText[x]).join(" · ")}</Chip></span>}
+          {s.implementationReadiness && <span title={readinessText[s.implementationReadiness].hint}><Chip tone={readinessText[s.implementationReadiness].tone}>{readinessText[s.implementationReadiness].label}</Chip></span>}
+          {s.critic && <span title={s.critic.issues.join(" · ") || "Independent review"}><Chip tone={s.critic.verdict === "strong" ? "go" : s.critic.verdict === "weak" ? "amber" : "neutral"}>Review: {verdictText[s.critic.verdict]}</Chip></span>}
           {d && <Chip tone={reviewTone[d.status]}>{reviewLabel[d.status]}</Chip>}
         </div>
         <h3 className="mt-3 text-[20px] font-semibold tracking-tight">{s.label}</h3>
         <p className="mt-1 max-w-[620px] text-[15px] leading-relaxed text-ink-soft">{s.headline}</p>
+        {s.promise && <p className="mt-2 max-w-[620px] text-[14px]"><span className="text-ink-mute">Visitors get: </span>{s.promise}</p>}
+        {s.specificToBusiness && <p className="mt-1 max-w-[620px] text-[13px] text-ink-soft"><span className="text-ink-mute">Why for you: </span>{s.specificToBusiness}</p>}
 
         {/* proposed experience — a conceptual visitor flow, not a generated experience */}
         <div className="mt-4">
@@ -259,6 +266,30 @@ function ReviewDrawer({ s, onClose, onWhy }: { s: ExperienceSuggestion; onClose:
           </div>
         </div>
 
+        {(s.motivation || s.decisionsResolved.length > 0 || s.outcome) && (
+          <section className="space-y-2 text-[14px]">
+            {s.motivation && <p><span className="text-ink-mute">Why someone starts it: </span>{s.motivation}</p>}
+            {s.decisionsResolved.length > 0 && <p><span className="text-ink-mute">Decisions it settles: </span>{s.decisionsResolved.join(" · ")}</p>}
+            {s.outcome && <p><span className="text-ink-mute">What they leave with: </span>{s.outcome}</p>}
+            {s.interactionType && <p><span className="text-ink-mute">How it works: </span>{interactionText[s.interactionType] ?? s.interactionType}</p>}
+          </section>
+        )}
+
+        {(s.whyNotSimpler || s.whyNotMoreComplex) && (
+          <section className="rounded-xl bg-canvas p-3 text-[14px]">
+            <h3 className="text-sm font-semibold">Why this size of solution</h3>
+            {s.whyNotSimpler && <p className="mt-1"><span className="text-ink-mute">Not simpler, because </span>{s.whyNotSimpler}</p>}
+            {s.whyNotMoreComplex && <p className="mt-1"><span className="text-ink-mute">Not bigger, because </span>{s.whyNotMoreComplex}</p>}
+          </section>
+        )}
+
+        {s.requirements.length > 0 && (
+          <section>
+            <h3 className="text-sm font-semibold">What it needs first</h3>
+            <ul className="mt-2 space-y-1.5 text-[14px] text-ink-soft">{s.requirements.map((r) => <li key={r} className="flex gap-2"><span className="text-amber">!</span>{r}</li>)}</ul>
+          </section>
+        )}
+
         <section>
           <h3 className="text-sm font-semibold">How it could work for a visitor</h3>
           <ol className="mt-2 space-y-2">
@@ -300,7 +331,8 @@ function ReviewDrawer({ s, onClose, onWhy }: { s: ExperienceSuggestion; onClose:
               {s.questionPlan.map((q, i) => (
                 <li key={q.question} className="flex gap-2">
                   <span className="w-5 shrink-0 text-right text-ink-mute tabular-nums">{i + 1}.</span>
-                  <span>{q.question}{q.condition && <span className="text-[12px] text-ink-mute"> · only if {q.condition}</span>}{q.options?.length ? <span className="block text-[12px] text-ink-mute">{q.options.join(" · ")}</span> : null}</span>
+                  <span>{q.question}{q.condition && <span className="text-[12px] text-ink-mute"> · only if {q.condition}</span>}{q.options?.length ? <span className="block text-[12px] text-ink-mute">{q.options.join(" · ")}</span> : null}
+                    {(q.purpose || q.basis) && <span className="block text-[11px] text-ink-mute">{q.purpose ? purposeText[q.purpose] : ""}{q.purpose && q.basis ? " — " : ""}{q.basis ?? ""}</span>}</span>
                 </li>
               ))}
             </ol>
@@ -430,6 +462,13 @@ function WhyDrawer({ s, onClose, onReview }: { s: ExperienceSuggestion; onClose:
           </li>
         ))}
       </ol>
+      {s.critic && (
+        <div className="mt-6 rounded-xl border border-line p-3 text-[14px]">
+          <p className="font-semibold">Independent review: {verdictText[s.critic.verdict]}</p>
+          {s.critic.issues.length > 0 && <ul className="mt-1.5 space-y-1 text-ink-soft">{s.critic.issues.map((x) => <li key={x}>– {x}</li>)}</ul>}
+          {s.critic.fix && <p className="mt-1.5 text-[13px]"><span className="text-ink-mute">Suggested fix: </span>{s.critic.fix}</p>}
+        </div>
+      )}
       <p className="mt-6 text-[12px] text-ink-mute">The quotes are observed. The recommendation is our suggestion — you decide.</p>
     </Drawer>
   );
@@ -501,6 +540,78 @@ function ContextsConsidered() {
               Merged into a recommendation: {merged.map((o) => `${o.label} → ${suggestion(o.entryId!)?.label ?? "—"}`).join("; ")}
             </p>
           )}
+        </Disclosure>
+      )}
+    </div>
+  );
+}
+
+const roleText: Record<string, string> = { main: "Main experience", supporting: "Supporting", invitation: "Invitation", tool_improvement: "Improves a tool you have" };
+const stageText: Record<string, string> = { explore: "Explore", consider: "Compare", plan: "Plan", ready: "Ready to book" };
+const readinessText: Record<string, { label: string; hint: string; tone: "go" | "amber" | "neutral" }> = {
+  ready: { label: "Possible now", hint: "Shapect can deliver this with today's capabilities.", tone: "go" },
+  conditional: { label: "Needs your input", hint: "Possible once you confirm details, content or image permissions.", tone: "amber" },
+  future: { label: "Future idea", hint: "Valuable, but needs capabilities or confirmed pricing Shapect doesn't have yet. Not deployable today.", tone: "neutral" },
+};
+const verdictText: Record<string, string> = { strong: "strong", keep_with_changes: "good, with changes", weak: "weak", reject: "held back" };
+const purposeText: Record<string, string> = { route: "Changes the next step", expectation: "Sets the right expectation", prepare: "Prepares your quote", qualify: "Checks the fit" };
+const interactionText: Record<string, string> = {
+  guided_questions: "A few guided questions", visual_choice: "Choosing between pictures", comparison: "Comparing options side by side", checklist: "A short checklist",
+  contextual_guide: "A short guide at the right moment", brief_builder: "Builds a project brief", inspiration_to_project: "From a project they like to their own brief",
+  upload_assist: "Helps them share photos or plans", invitation: "A well-placed invitation into your process", tool_improvement: "An improvement to a tool you already have",
+};
+const servedText: Record<string, string> = { path: "Own path in an experience", own_entry: "Own experience", invitation: "Invitation", tool_improvement: "Improves a tool", copy_only: "Wording only", none: "Nothing new" };
+
+/** The strategic logic: where visitors get stuck, which architecture and why, how each motivation is served, and the independent review. */
+function StrategyOverview() {
+  const { bp } = useAnalysis();
+  const a = bp.architecture;
+  if (!a && !bp.frictions.length && !bp.critique) return null;
+  return (
+    <div className="mb-6 space-y-3" data-testid="strategy-overview">
+      {bp.frictions.length > 0 && (
+        <div className="rounded-2xl border border-line bg-paper p-5">
+          <h3 className="text-[15px] font-semibold">Where your visitors get stuck today</h3>
+          <ul className="mt-3 space-y-2.5 text-[14px]">
+            {bp.frictions.map((f) => (
+              <li key={f.id}>
+                <span className="font-medium">“{f.visitorQuestion}”</span>
+                {f.status === "inferred" && <span className="ml-1.5 text-[11px] text-ink-mute">(our hypothesis)</span>}
+                <span className="block text-[13px] text-ink-soft">{f.whyHardHere}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {a && (
+        <Disclosure id="architecture" title="How the experiences fit together" summary={a.chosen}>
+          <p className="text-[14px] text-ink-soft">{a.rationale}</p>
+          {a.motivations.length > 0 && (
+            <ul className="mt-3 divide-y divide-line rounded-xl border border-line text-[13px]">
+              {a.motivations.map((m) => (
+                <li key={m.motivation} className="flex flex-wrap gap-x-3 px-3 py-2">
+                  <span className="font-medium capitalize">{m.motivation}</span>
+                  <span className="text-ink-mute">{servedText[m.servedBy]}</span>
+                  <span className="basis-full text-ink-soft">{m.note}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {a.alternatives.length > 0 && (
+            <p className="mt-3 text-[12px] text-ink-mute">Also considered: {a.alternatives.map((x) => `${x.label} (${x.fit})`).join(" · ")}</p>
+          )}
+        </Disclosure>
+      )}
+      {bp.critique && (
+        <Disclosure id="review" title="Independent review" summary={`${bp.critique.held.length ? `${bp.critique.held.length} idea held back · ` : ""}${bp.critique.missed.length} more ideas raised`}>
+          <p className="text-[14px] text-ink-soft">{bp.critique.summary}</p>
+          {bp.critique.held.map((h) => <p key={h.label} className="mt-2 text-[13px]"><span className="font-medium">Held back: {h.label}</span> — {h.reason}</p>)}
+          {bp.critique.missed.length > 0 && (
+            <ul className="mt-3 space-y-1.5 text-[13px]">
+              {bp.critique.missed.map((m) => <li key={m.label}><span className="font-medium">{m.label}</span> — {m.why}</li>)}
+            </ul>
+          )}
+          <p className="mt-3 text-[11px] text-ink-mute">Reviewed by a different AI model ({bp.critique.model}). Its view is a second opinion, not a fact.</p>
         </Disclosure>
       )}
     </div>

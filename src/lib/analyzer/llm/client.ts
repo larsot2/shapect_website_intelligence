@@ -5,7 +5,7 @@
  *
  * Provider: OpenRouter chat completions. Stage → model:
  *      understanding → OPENROUTER_UNDERSTANDING_MODEL (google/gemini-3.1-flash-lite-preview)
- *      strategy      → OPENROUTER_STRATEGY_MODEL      (google/gemini-3-flash-preview)
+ *      strategy      → OPENROUTER_STRATEGY_MODEL      (google/gemini-3.1-pro-preview)
  *    No cross-model fallback: a repair or retry always uses the stage's own model.
  *    If the model is unavailable the call fails and the scan ends as partial.
  *
@@ -19,7 +19,7 @@ import { fetch as undiciFetch, ProxyAgent, type Dispatcher } from "undici";
 import { z } from "zod";
 import { config } from "../config";
 
-export type LlmStage = "understanding" | "strategy";
+export type LlmStage = "understanding" | "strategy" | "critic" | "judge";
 
 export interface LlmCallRecord {
   stage: LlmStage;
@@ -88,13 +88,19 @@ const env = (k: string, d = "") => process.env[k] ?? d;
 export function modelFor(stage: LlmStage): string {
   return stage === "understanding"
     ? env("OPENROUTER_UNDERSTANDING_MODEL", "google/gemini-3.1-flash-lite-preview")
-    : env("OPENROUTER_STRATEGY_MODEL", "google/gemini-3-flash-preview");
+    : stage === "critic"
+    ? env("OPENROUTER_CRITIC_MODEL", "z-ai/glm-5")
+    : stage === "judge"
+    ? env("OPENROUTER_JUDGE_MODEL", "x-ai/grok-4.7")
+    : env("OPENROUTER_STRATEGY_MODEL", "google/gemini-3.1-pro-preview");
 }
 
 /** USD per 1M tokens (OpenRouter list prices 2026-11-16) — only used to estimate cost when the provider doesn't report it. */
 const PRICES: Record<string, { in: number; out: number }> = {
   "google/gemini-3.1-flash-lite-preview": { in: 0.25, out: 1.5 },
-  "google/gemini-3-flash-preview": { in: 0.5, out: 3.0 },
+  "google/gemini-3.1-pro-preview": { in: 2.0, out: 12.0 }, // estimate only — real cost comes from OpenRouter usage
+  "z-ai/glm-5": { in: 1.0, out: 3.2 },
+  "x-ai/grok-4.7": { in: 2.0, out: 6.0 },
 };
 
 export function llmConfigured(): boolean {
@@ -125,6 +131,8 @@ async function callOpenRouter(args: {
   maxTokens: number;
   /** thinking budget — counts against max_tokens on Gemini, so it is capped explicitly */
   reasoningTokens: number;
+  /** thinking level instead of a budget (Gemini 3: maps to thinkingLevel) */
+  reasoningEffort?: "low" | "medium" | "high";
 }): Promise<RawCompletion> {
   const send = async (format: "json_schema" | "json_object"): Promise<RawCompletion> => {
     const ctrl = new AbortController();
@@ -138,10 +146,10 @@ async function callOpenRouter(args: {
         body: JSON.stringify({
           model: args.model,
           messages: args.messages,
-          max_tokens: args.maxTokens + args.reasoningTokens,
+          max_tokens: args.maxTokens + (args.reasoningEffort ? 24_000 : args.reasoningTokens),
           temperature: 0,
           usage: { include: true },
-          reasoning: { max_tokens: args.reasoningTokens, exclude: true },
+          reasoning: args.reasoningEffort ? { effort: args.reasoningEffort, exclude: true } : { max_tokens: args.reasoningTokens, exclude: true },
           // only providers that honour the requested parameters (no silent downgrade)
           provider: { require_parameters: true, allow_fallbacks: true },
           response_format: format === "json_schema" && args.jsonSchema
@@ -259,7 +267,7 @@ export async function completeJson<T>(o: CompleteOptions<T>): Promise<T> {
   const model = modelFor(o.stage);
   o.usage.models[o.stage] = model;
   const schemaVersion = o.schemaVersion ?? "v2";
-  const maxOut = o.maxOutputTokens ?? (o.stage === "strategy" ? 10_000 : 7_000);
+  const maxOut = o.maxOutputTokens ?? (o.stage === "strategy" ? 16_000 : o.stage === "critic" ? 10_000 : 8_000);
   // Large nested schemas make Gemini's constrained decoding cut corners (empty arrays), so the
   // strategy uses JSON mode + Zod validation; the compact understanding schema uses json_schema.
   const jsonSchema = o.stage === "understanding" ? providerSchema(o.schema) : undefined;
@@ -267,9 +275,9 @@ export async function completeJson<T>(o: CompleteOptions<T>): Promise<T> {
 
   const record = (r: RawCompletion | null, extra: Partial<LlmCallRecord>): LlmCallRecord => {
     const estIn = Math.ceil((extra.inputBytes ?? 0) / 4), estOut = Math.ceil((extra.outputBytes ?? 0) / 4);
-    const real = r?.inputTokens != null && r?.outputTokens != null;
+    const real = r?.inputTokens != null && r?.outputTokens != null && !(r.inputTokens === 0 && (r.text?.length ?? 0) > 0);
     const price = PRICES[model];
-    const cost = r?.costUsd ?? (real && price ? (r!.inputTokens! * price.in + r!.outputTokens! * price.out) / 1e6 : null);
+    const cost = real ? r?.costUsd ?? (price ? (r!.inputTokens! * price.in + r!.outputTokens! * price.out) / 1e6 : null) : null;
     const rec: LlmCallRecord = {
       stage: o.stage, task: o.task, provider: r?.provider ?? provider, model: r?.model ?? model, promptVersion: o.promptVersion, schemaVersion,
       inputTokens: real ? r!.inputTokens! : estIn, outputTokens: real ? r!.outputTokens! : estOut,
@@ -297,7 +305,7 @@ export async function completeJson<T>(o: CompleteOptions<T>): Promise<T> {
     let r: RawCompletion;
     for (;;) {
       try {
-        r = await callOpenRouter({ model, messages, jsonSchema, schemaName: o.task.replace(/[^a-z0-9_]/gi, "_"), maxTokens: maxOut, reasoningTokens: o.stage === "strategy" ? 2500 : 800 });
+        r = await callOpenRouter({ model, messages, jsonSchema, schemaName: o.task.replace(/[^a-z0-9_]/gi, "_"), maxTokens: maxOut, reasoningTokens: o.stage === "strategy" ? 8000 : 800, reasoningEffort: o.stage === "understanding" ? undefined : "high" });
         break;
       } catch (e) {
         const pe = e as ProviderError;
@@ -350,9 +358,13 @@ export async function completeJson<T>(o: CompleteOptions<T>): Promise<T> {
   }
   o.usage.failures.push(`${o.task}: first answer invalid`);
   (o.usage.rejected ??= []).push({ task: o.task, errors: v1.errors, text: first.r.text.slice(0, 20000) });
-  // one targeted repair, same model
-  const second = await callOnce(first.r.truncated || /Unterminated|No JSON/i.test(v1.errors)
-    ? [{ role: "user", content: `${o.prompt}\n\nIMPORTANT: your previous answer was cut off. Return a COMPLETE JSON object: be concise — short texts, at most 8 opportunities, at most 3 entries, at most 6 questions each.` }]
+  // one targeted repair, same model. A stream cut by the provider (unterminated JSON without a length stop)
+  // is retried unchanged; only a real length stop asks for a more concise answer.
+  const cut = /Unterminated|No JSON/i.test(v1.errors);
+  const second = await callOnce(cut && !first.r.truncated
+    ? [{ role: "user", content: o.prompt }]
+    : first.r.truncated
+    ? [{ role: "user", content: `${o.prompt}\n\nIMPORTANT: your previous answer hit the length limit. Return a COMPLETE JSON object with shorter texts (keep the same number of entries, at most 6 questions each).` }]
     : [
       { role: "user", content: o.prompt },
       { role: "assistant", content: first.r.text.slice(0, 40_000) },

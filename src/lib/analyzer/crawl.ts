@@ -254,17 +254,24 @@ export async function selectPages(st: CrawlState, onProgress: Progress): Promise
   const picked: string[] = [dedupeKey(st.homeUrl)];
   const covered = new Set<string>(coverageTags(st.candidates.get(dedupeKey(st.homeUrl))!, true));
   const used: Partial<Record<PageGroup, number>> = {};
+  // A topic mentioned by a blog post, gallery or case study is NOT covered for the offer itself:
+  // "/9-small-ensuite-ideas" must not stop us from reading "/small-bathroom-renovations".
+  // members of a page family (case studies, suburb variants) are examples of an offer, not the offer
+  const isOffer = (c: Candidate) => OFFER_GROUPS.has(c.group) && !c.clusterId && !ARTICLE_SLUG.test(new URL(c.url).pathname.replace(/[-_/]+/g, " "));
+  const isTopic = (t: string) => TOPIC_PREFIXES.has(t.split(":")[0]);
+  const cover = (c: Candidate) => coverageTags(c).forEach((t) => covered.add(isTopic(t) && !isOffer(c) ? `${t}@content` : t));
+  const novelFor = (c: Candidate) => coverageTags(c).filter((t) => !covered.has(t) && (isOffer(c) || !isTopic(t) || !covered.has(`${t}@content`)));
   const ctaTarget = pool.find(([, c]) => c.ctaLinked && ["quote", "contact", "booking", "calculator"].includes(c.group));
-  if (ctaTarget) { picked.push(ctaTarget[0]); coverageTags(ctaTarget[1]).forEach((t) => covered.add(t)); used[ctaTarget[1].group] = 1; }
+  if (ctaTarget) { picked.push(ctaTarget[0]); cover(ctaTarget[1]); used[ctaTarget[1].group] = 1; }
   // the core service page (e.g. /bathroom-renovations) is always read — it defines the main offer
   const core = pool
     .filter(([k, c]) => !picked.includes(k) && c.group === "service" && /bathroom[- ]renovation/i.test(new URL(c.url).pathname) && new URL(c.url).pathname.split("/").filter(Boolean).length <= 2)
     .sort((a, b) => b[1].inlinks - a[1].inlinks || a[1].url.length - b[1].url.length)[0];
-  if (core) { picked.push(core[0]); coverageTags(core[1]).forEach((t) => covered.add(t)); used.service = 1; }
+  if (core) { picked.push(core[0]); cover(core[1]); used.service = 1; }
   // FAQ and pricing pages carry business rules, exclusions and price references — read the best of each
   for (const g of ["faq", "pricing"] as PageGroup[]) {
     const best = pool.filter(([k, c]) => !picked.includes(k) && c.group === g).sort((a, b) => b[1].score - a[1].score)[0];
-    if (best) { picked.push(best[0]); coverageTags(best[1]).forEach((t) => covered.add(t)); used[g] = 1; }
+    if (best) { picked.push(best[0]); cover(best[1]); used[g] = 1; }
   }
   const homeTitle = st.candidates.get(dedupeKey(st.homeUrl))?.signals?.title?.trim().toLowerCase();
   const isHomeDuplicate = (c: Candidate) => /^\/(home|home-page|homepage|index)\/?$/i.test(new URL(c.url).pathname) || (!!homeTitle && c.signals?.title?.trim().toLowerCase() === homeTitle);
@@ -276,17 +283,19 @@ export async function selectPages(st: CrawlState, onProgress: Progress): Promise
       if (picked.includes(k)) continue;
       if (isHomeDuplicate(c)) continue;
       if ((used[c.group] ?? 0) >= (QUOTAS[c.group] ?? 1) + 2) continue; // soft cap, novelty decides
-      const tags = coverageTags(c);
-      const novel = tags.filter((t) => !covered.has(t));
+      const novel = novelFor(c);
       const relevance = Math.max(0.15, Math.min(1, c.score / 30)) * (GROUP_RELEVANCE[c.group] ?? 0.6);
-      const reusePenalty = (used[c.group] ?? 0) * (c.group === "service" ? 2 : 6);
-      const gain = novel.reduce((n, t) => n + tagWeight(t), 0) * 10 * relevance + c.score * 0.25 - reusePenalty;
+      const offerNovel = isOffer(c) && novel.some(isTopic);
+      // another service page is no repetition when it shows an offer we haven't read yet
+      const reusePenalty = offerNovel ? 0 : (used[c.group] ?? 0) * (c.group === "service" ? 2 : 6);
+      // articles/galleries only hint at a topic; the offer page is the source
+      const gain = novel.reduce((n, t) => n + tagWeight(t) * (isTopic(t) && !isOffer(c) ? 0.5 : 1), 0) * 10 * relevance + c.score * 0.25 - reusePenalty;
       if (!best || gain > best.gain) best = { k, c, gain };
     }
     if (!best || best.gain < 3 || (best.gain < 8 && picked.length >= 8)) break; // nothing new worth a deep read
     if (picked.length >= target && best.gain < 28) break;
     picked.push(best.k);
-    coverageTags(best.c).forEach((t) => covered.add(t));
+    cover(best.c);
     used[best.c.group] = (used[best.c.group] ?? 0) + 1;
   }
   st.selected = picked;
@@ -297,13 +306,17 @@ export async function selectPages(st: CrawlState, onProgress: Progress): Promise
 const TAG_WEIGHT: Record<string, number> = { prop: 3, persp: 2.5, svc: 2, conv: 3, tool: 3, info: 2, price: 2.5, seg: 3, design: 2.5, trust: 0.5, group: 1 };
 const TAG_RULES: [string, RegExp][] = [
   ["prop:house", /\bhouses?\b|\bhome\b(?! renovations)/], ["prop:apartment", /\bapartments?\b|\bunits?\b/], ["prop:granny", /granny/], ["prop:townhouse", /townhouse/],
-  ["svc:ensuite", /ensuite/], ["svc:laundry", /laundr/], ["svc:kitchen", /kitchen/], ["svc:waterproof", /waterproof/], ["svc:structural", /structural|extension/],
+  ["svc:ensuite", /ensuite/], ["svc:laundry", /laundr/], ["svc:kitchen", /kitchen/], ["svc:waterproof", /waterproof/], ["svc:structural", /structural|extension/], ["svc:design_service", /designer|design service|design consult/],
   ["persp:small", /\bsmall\b|compact/], ["persp:luxury", /luxury|premium/], ["persp:budget", /budget|affordable/], ["persp:accessible", /accessib|disab|ndis|elderly/],
   ["seg:commercial", /commercial|strata|office|hospitality|retail/],
   ["design:design", /design|style|inspiration|gallery|before and after|ideas/], ["svc:bathroom", /bathroom renovation/],
   ["price", /cost|price|pricing|\$|package/], ["info:faq", /faq|question/], ["info:process", /process|how we work|what to expect/],
 ];
 const TOPIC_PREFIXES = new Set(["prop", "persp", "svc", "seg", "design"]);
+/** pages that describe an offer (service, segment, design service) — their topics count as "covered" */
+const OFFER_GROUPS = new Set<PageGroup>(["service", "commercial", "design"]);
+/** listicles, guides and comparisons are content even when filed under services/design */
+const ARTICLE_SLUG = /(^| )\d+ |\b(ideas|tips|guide|signs|ways|how|why|what|which|vs|reasons|mistakes|examples|before and after)\b/;
 const DECISION_GROUPS = new Set(["pricing", "calculator", "quote", "booking", "contact", "faq", "design", "projects", "service", "commercial"]);
 /** group novelty only counts for decision-relevant page types (not blog indexes, about, other) */
 const tagWeight = (t: string) => (t.startsWith("group:") ? (DECISION_GROUPS.has(t.slice(6)) ? 1 : 0) : TAG_WEIGHT[t.split(":")[0]] ?? 1);

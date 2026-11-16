@@ -229,8 +229,32 @@ export type ContextInsight = z.infer<typeof ContextInsightSchema>;
 export const ExperienceSuggestionSchema = z.object({
   id,
   label: z.string(),
-  action: z.enum(["add", "improve", "connect", "reposition", "none"]),
+  action: z.enum(["add", "improve", "replace", "complement", "connect", "reposition", "invite", "none"]),
   headline: shortText, // one-line customer value
+  /** V3: role in the experience network and priority (1 = main) */
+  role: z.enum(["main", "supporting", "invitation", "tool_improvement"]).optional(),
+  priority: z.number().int().min(1).max(9).optional(),
+  /** customer stages this experience serves */
+  stages: z.array(z.enum(["explore", "consider", "plan", "ready"])).default([]),
+  interactionType: z.enum(["guided_questions", "visual_choice", "comparison", "checklist", "contextual_guide", "brief_builder", "inspiration_to_project", "upload_assist", "invitation", "tool_improvement", "other"]).optional(),
+  motivation: z.string().max(220).optional(),
+  promise: z.string().max(220).optional(),
+  decisionsResolved: z.array(z.string().max(180)).default([]),
+  outcome: z.string().max(240).optional(),
+  /** strategic value vs what Shapect can deliver today */
+  implementationReadiness: z.enum(["ready", "conditional", "future"]).optional(),
+  requirements: z.array(z.string().max(200)).default([]),
+  whyNotSimpler: z.string().max(240).optional(),
+  whyNotMoreComplex: z.string().max(240).optional(),
+  specificToBusiness: z.string().max(260).optional(),
+  /** content objects (blueprint.contentAssets) it starts from */
+  sourceContentIds: z.array(z.string()).default([]),
+  riskFlags: z.array(z.string()).default([]),
+  /** independent critic review (different model): rank, verdict, scores 1–5, concrete issues */
+  critic: z.object({
+    rank: z.number().int(), verdict: z.enum(["strong", "keep_with_changes", "weak", "reject"]),
+    scores: z.record(z.string(), z.number()).default({}), issues: z.array(z.string()).default([]), fix: z.string().optional(),
+  }).optional(),
   customerNeed: shortText,
   businessGoal: shortText,
   whatHappensNext: shortText,
@@ -245,7 +269,6 @@ export const ExperienceSuggestionSchema = z.object({
   questionPlan: z.array(QuestionSchema).default([]),
   /** ids of the visitor frictions (blueprint.frictions) this entry resolves */
   resolvesFrictions: z.array(z.string()).default([]),
-  riskFlags: z.array(z.string()).default([]),
   complexity: z.enum(["low", "medium", "high"]).optional(),
   /** Conceptual visitor flow of the proposed experience (2–4 steps) — not generated or activated. */
   experienceSteps: z.array(z.object({ title: z.string().min(1).max(60), detail: z.string().max(180) })).max(4).default([]),
@@ -276,7 +299,7 @@ export const AssetActionSchema = z.object({
   assetId: id,
   pageId: id,
   /** bridge = route this CTA into a suggested experience before the existing destination (proposal only). */
-  proposal: z.enum(["keep", "replace", "redirect", "bridge", "remove"]),
+  proposal: z.enum(["keep", "improve", "reposition", "replace", "redirect", "bridge", "remove"]),
   rationale: shortText,
   relatedSuggestionId: id.optional(),
 });
@@ -300,6 +323,8 @@ export const ConnectionSuggestionSchema = z.object({
   unavailableFields: z.array(z.string()).default([]),
   /** Limits on reuse, e.g. "pricing only with a confirmed pricing basis". */
   constraints: z.array(shortText).default([]),
+  /** why a visitor would want to continue (bridges) */
+  motivation: z.string().max(220).optional(),
   rationale: shortText,
   evidence: z.array(EvidenceSchema),
 });
@@ -359,7 +384,7 @@ export const BlueprintSchema = z.object({
   }),
   coverage: z.array(CoverageSchema),
   journeys: z.array(JourneySchema).min(1),
-  suggestedExperiences: z.array(ExperienceSuggestionSchema).max(3),
+  suggestedExperiences: z.array(ExperienceSuggestionSchema).max(5),
   assetActions: z.array(AssetActionSchema).default([]),
   suggestedConnections: z.array(ConnectionSuggestionSchema).default([]),
   unsupportedOpportunities: z.array(OpportunitySchema).default([]),
@@ -403,10 +428,49 @@ export const BlueprintSchema = z.object({
   })).default([]),
   opportunityInventory: z.array(z.object({
     id: z.string(), label: z.string(), contextIds: z.array(z.string()).default([]), decisionGap: z.string(),
-    action: z.enum(["add", "improve", "connect", "reposition", "none"]), support: SupportSchema, note: z.string().optional(),
+    action: z.enum(["add", "improve", "replace", "complement", "connect", "reposition", "invite", "none"]), support: SupportSchema, note: z.string().optional(),
     entryId: z.string().optional(),
+    /** V3 transformation contract: source → observed signal → intent (hypothesis) → transformation → readiness */
+    sourcePageIds: z.array(z.string()).default([]),
+    sourceAssetIds: z.array(z.string()).default([]),
+    sourceContentIds: z.array(z.string()).default([]),
+    stage: z.enum(["explore", "consider", "plan", "ready"]).optional(),
+    observedSignal: z.string().max(240).optional(),
+    visitorIntent: z.string().max(200).optional(),
+    transformation: z.string().max(260).optional(),
+    interactionType: z.enum(["guided_questions", "visual_choice", "comparison", "checklist", "contextual_guide", "brief_builder", "inspiration_to_project", "upload_assist", "invitation", "tool_improvement", "other"]).optional(),
+    minimumIntervention: z.string().max(220).optional(),
+    richerAlternative: z.string().max(220).optional(),
+    value: z.enum(["high", "medium", "low"]).optional(),
+    readiness: z.enum(["ready", "conditional", "future"]).optional(),
+    requirements: z.array(z.string().max(160)).default([]),
+    assumptions: z.array(z.string().max(160)).default([]),
+    evidence: z.array(EvidenceSchema).default([]),
   })).default([]),
-  recommendationCount: z.object({ count: z.number().int().min(0).max(3), rationale: z.string() }).optional(),
+  recommendationCount: z.object({ count: z.number().int().min(0).max(5), rationale: z.string() }).optional(),
+  /** V3: architectures considered (one adaptive entry, independent entries, network, service-specific, invitations) */
+  architecture: z.object({
+    chosen: z.string().max(220),
+    rationale: z.string().max(420),
+    alternatives: z.array(z.object({ key: z.string(), label: z.string().max(80), fit: z.enum(["strong", "partial", "weak"]), why: z.string().max(240) })).default([]),
+    /** every motivation the site markets, and how the proposal serves it */
+    motivations: z.array(z.object({ motivation: z.string().max(100), pageIds: z.array(z.string()).default([]), servedBy: z.enum(["path", "own_entry", "invitation", "tool_improvement", "copy_only", "none"]), entryId: z.string().optional(), note: z.string().max(220) })).default([]),
+  }).optional(),
+  contentAssets: z.array(z.object({
+    id: z.string(), pageId: z.string(),
+    kind: z.enum(["gallery", "project_example", "before_after", "article", "price_guide", "package", "faq", "testimonial", "design_service", "other"]),
+    label: z.string().max(100), whatItShows: z.string().max(200), evidence: z.array(EvidenceSchema).default([]),
+  })).default([]),
+  assetReviews: z.array(z.object({
+    assetId: z.string(), strengths: z.array(z.string().max(170)).default([]), weaknesses: z.array(z.string().max(170)).default([]),
+    contextFit: z.enum(["fits", "mismatch", "unknown"]), contextNote: z.string().max(200).optional(), evidence: z.array(EvidenceSchema).default([]),
+  })).default([]),
+  readinessSignals: z.array(z.string().max(160)).default([]),
+  critique: z.object({
+    model: z.string(), summary: z.string().max(900), architectureNote: z.string().max(700).optional(),
+    held: z.array(z.object({ label: z.string(), reason: z.string() })).default([]),
+    missed: z.array(z.object({ label: z.string(), why: z.string(), evidence: z.array(EvidenceSchema).default([]) })).default([]),
+  }).optional(),
   importantUninspected: z.array(z.object({ url: z.string(), label: z.string(), group: z.string(), reason: z.string() })).default([]),
   /** Customer decisions visitors try to make, with how well the site supports them. */
   visitorDecisions: z.array(z.object({

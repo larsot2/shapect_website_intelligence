@@ -60,7 +60,7 @@ describe("URL handling & discovery heuristics", () => {
 
 describe("V2 gates", () => {
   const entry = (over: Partial<StrategyEntry>): StrategyEntry => ({
-    label: "Project Planner", opportunityIds: [], frictionIds: [], action: "add", headline: "Plan your bathroom before the visit",
+    label: "Project Planner", opportunityIds: [], frictionIds: [], sourceContentIds: [], action: "add", headline: "Plan your bathroom before the visit",
     businessOutcome: "b", visitorOutcome: "v", currentState: "c", coverageGap: "g", capabilityKeys: ["guided_questions", "conditional_questions"],
     support: "supported", consolidationRationale: "same goal", commonFlow: [{ title: "Project", detail: "a few questions" }],
     contextVariants: [{ contextId: "house", pageIds: ["home"], startingHook: "Planning a house bathroom?", focus: null, additionalQuestions: [], fallbackIfUnknown: null }],
@@ -164,5 +164,35 @@ describe("prompt safety", async () => {
     expect(prompt.match(/WEBSITE_DATA>>>/g)).toHaveLength(1);
     expect(prompt.match(/<<<WEBSITE_DATA/g)).toHaveLength(1);
     expect(prompt.indexOf("ignore previous instructions")).toBeGreaterThan(prompt.indexOf("<<<WEBSITE_DATA"));
+  });
+});
+
+describe("mechanical content checks", () => {
+  it("normalises prices and detects placeholders", async () => {
+    const { normalisePrice, PLACEHOLDER_RE, pricesIn } = await import("@/lib/analyzer/content-check");
+    expect(normalisePrice("$20K")).toBe(20000);
+    expect(normalisePrice("$19,990")).toBe(19990);
+    expect(pricesIn("from $12k to $18,000")).toEqual([12000, 18000]);
+    for (const t of ["similar projects fall into our [Tier] range ([Price])", "{{calculator.result}}", "Costs TBD", "around $X"]) expect(PLACEHOLDER_RE.test(t)).toBe(true);
+    for (const t of ["Choose [optional] extras?", "Ensuite or main bathroom?"]) expect(PLACEHOLDER_RE.test(t)).toBe(false);
+  });
+
+  it("removes unverifiable prices and unfinished questions, keeps verified ones", async () => {
+    const { checkContent } = await import("@/lib/analyzer/content-check");
+    const s = {
+      id: "sx-a", label: "Planner", headline: "Plan it. Packages from $9,999.", stages: ["plan"], riskFlags: [], experienceSteps: [], touchpoints: [], reasoning: ["ok"],
+      pageContexts: [{ pageId: "home", startingHook: "Start" }], contextVariants: [],
+      questionPlan: [
+        { question: "Your project falls into our [Tier] range — OK?", fieldKey: "budget.comfort_with_public_range", answerType: "yes_no" },
+        { question: "Our renovations start from $20,000 — does that suit you?", fieldKey: "budget.comfort_with_public_range", answerType: "yes_no" },
+        { question: "Which room?", fieldKey: "project.room_type", answerType: "single_choice" },
+      ],
+    };
+    const bp = { suggestedExperiences: [s], suggestedConnections: [], frictions: [], opportunityInventory: [] } as never;
+    const r = checkContent(bp, "Standard bathrooms start from $20K.");
+    const out = r.bp.suggestedExperiences[0];
+    expect(out.questionPlan.map((q) => q.fieldKey)).toEqual(["budget.comfort_with_public_range", "project.room_type"]);
+    expect(out.headline).toBe("Plan it.");
+    expect(r.removed.length).toBe(2);
   });
 });

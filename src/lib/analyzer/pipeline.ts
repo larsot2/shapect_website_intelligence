@@ -14,11 +14,12 @@ import { config, PROMPT_VERSION } from "./config";
 import type { InvAsset, SitePage } from "./inventory";
 import { addPages, collectSite, type Collected } from "./collect";
 import { completeJson, llmConfigured, newUsage, type LlmUsage } from "./llm/client";
-import { buildDeltaPrompt, buildStrategyPrompt, buildUnderstandingPrompt } from "./llm/prompts";
-import { StrategySchema, UnderstandingDeltaSchema, UnderstandingSchema, type Strategy, type Understanding, type UnderstandingDelta } from "./llm/schemas";
+import { buildCritiquePrompt, buildRevisionPrompt, buildDeltaPrompt, buildStrategyPrompt, buildUnderstandingPrompt } from "./llm/prompts";
+import { CritiqueSchema, StrategySchema, UnderstandingDeltaSchema, UnderstandingSchema, type Critique, type Strategy, type Understanding, type UnderstandingDelta } from "./llm/schemas";
 import type { PageCapture } from "./capture";
 import { applyEntryGates, contextFidelity } from "./gates";
 import { buildEvidence, type EvidenceItem } from "./evidence";
+import { checkContent } from "./content-check";
 import { FIELD_CATALOG } from "./fields";
 import { SUPPORTED_SCOPE_RE, UNSUPPORTED_SCOPE_RE } from "./capabilities";
 import { networkMode, newFetchStats } from "./net/fetcher";
@@ -27,7 +28,7 @@ import { PHASES, saveBlueprint, saveDebug, saveJob, scanDir, type JobState, type
 import { dedupeKey } from "./urls";
 import { pageTopics } from "./crawl";
 
-export const SCHEMA_VERSION_LLM = "wia-schema-v2";
+export const SCHEMA_VERSION_LLM = "wia-schema-v3";
 
 const slug = (s: string, max = 40) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, max).replace(/-+$/, "") || "x";
 const prettyLabel = (s: string) => (s === s.toUpperCase() && /[A-Z]{3}/.test(s) ? s.charAt(0) + s.slice(1).toLowerCase() : s).replace(/^Form: “(.*)”$/, "Form ($1)");
@@ -203,14 +204,14 @@ function addTopicStubs(u: Understanding, pages: SitePage[]): Understanding {
     for (const t of pageTopics(p.url, p.digest.h1[0])) {
       if (covers(t) || stubs.some((s2) => s2.id === `topic-${t}`)) continue;
       stubs.push({
-        id: `topic-${t}`, label: `${t.replace(/_/g, " ").replace(/^./, (ch) => ch.toUpperCase())} (detected from page, not analysed)`, sourcePageIds: [p.id],
+        id: `topic-${t}`, label: `${t.replace(/_/g, " ").replace(/^./, (ch) => ch.toUpperCase())} (from its own page)`, sourcePageIds: [p.id],
         facets: {}, customerIntent: null, unresolvedDecisions: [], specificConstraints: [], existingCoverage: { level: "unknown", note: null, assetIds: [] },
         requiredFieldKeys: [], conversionGoalAssetId: null, support: /commercial|kitchen|laundry|structural/.test(t) ? "unsupported" : "owner_review",
         differsBy: "questions", evidenceIds: [],
       });
     }
   }
-  return stubs.length ? { ...u, contexts: [...u.contexts, ...stubs.slice(0, 3)], uncertainties: [...u.uncertainties, `Topics on your pages we didn't analyse in depth: ${stubs.map((x) => x.id.slice(6)).join(", ")}`].slice(0, 6) } : u;
+  return stubs.length ? { ...u, contexts: [...u.contexts, ...stubs.slice(0, 5)], uncertainties: [...u.uncertainties, `Topics with their own page but no worked-out context yet: ${stubs.map((x) => x.id.slice(6)).join(", ")}`].slice(0, 6) } : u;
 }
 
 /** Service/design pages the context matrix doesn't account for (context fidelity input). */
@@ -220,7 +221,9 @@ function unmappedPages(u: Understanding, pages: SitePage[]): string[] {
 }
 
 /** LLM stages + gates + assembly on a (possibly frozen) Collected package. */
-export async function analyze(c: Collected, o: AnalyzeOptions): Promise<{ blueprint: Blueprint; understanding: Understanding | null; strategy: Strategy | null; evidence: EvidenceItem[]; understandingOk: boolean; strategyOk: boolean }> {
+export interface StrategyTrail { initial: Strategy | null; critique: Critique | null; revised: Strategy | null; finalCritique: Critique | null }
+
+export async function analyze(c: Collected, o: AnalyzeOptions): Promise<{ blueprint: Blueprint; understanding: Understanding | null; strategy: Strategy | null; evidence: EvidenceItem[]; understandingOk: boolean; strategyOk: boolean; trail: StrategyTrail }> {
   const busy = (sec: number) => o.log(`The AI service is busy — trying again in ${sec}s`);
   let evidence = buildEvidence(c.pages);
   await o.phase?.("understanding");
@@ -287,12 +290,78 @@ export async function analyze(c: Collected, o: AnalyzeOptions): Promise<{ bluepr
     }
   }
 
-  const raw = assemble({ scanId: o.scanId, c, understanding, strategy, captures, evidence, usage: o.usage, stats: o.stats, warnings: o.warnings, t0: o.t0 });
+  // independent critic (different model) → one revision by the strategist → final critic ranking.
+  // The critic never rewrites anything itself; the strategist decides what to take from it.
+  let critique: Critique | null = null;
+  const trail: StrategyTrail = { initial: strategy, critique: null, revised: null, finalCritique: null };
+  const critic = async (st: Strategy, task: string) => completeJson({
+    stage: "critic", task, schema: CritiqueSchema, schemaVersion: SCHEMA_VERSION_LLM, usage: o.usage, promptVersion: PROMPT_VERSION, onWait: busy,
+    prompt: buildCritiquePrompt({ c, understanding: understanding!, strategy: st, evidence }),
+  });
+  if (strategy && understanding && strategy.entries.length && process.env.ANALYZER_CRITIC !== "off") {
+    try {
+      o.log("Having the ideas critically reviewed");
+      critique = await critic(strategy, "critique");
+      trail.critique = critique;
+      if (process.env.ANALYZER_REVISE !== "off") {
+        o.log("Sharpening the ideas with the review");
+        try {
+          const strategyPrompt = buildStrategyPrompt({ c, understanding, evidence, sections: sectionsText(captures, c.pages), gateFacts: gateFacts(c.assets, understanding, c.pages), unmappedPages: unmappedPages(understanding, c.pages) });
+          const revised = await completeJson({
+            stage: "strategy", task: "strategy-revision", schema: StrategySchema, schemaVersion: SCHEMA_VERSION_LLM, usage: o.usage, promptVersion: PROMPT_VERSION, onWait: busy,
+            prompt: buildRevisionPrompt(strategyPrompt, JSON.stringify(strategy), JSON.stringify(critique)),
+          });
+          if (revised.entries.length) {
+            const first = critique;
+            strategy = revised;
+            trail.revised = revised;
+            critique = await critic(strategy, "critique-final").catch(() => first);
+            if (critique !== first) trail.finalCritique = critique;
+          }
+        } catch (e) {
+          o.warnings.push(`Revision after review failed (${(e as Error).message}) — showing the first version with its review.`);
+        }
+      }
+    } catch (e) {
+      o.warnings.push(`Critical review failed (${(e as Error).message}) — recommendations are shown unreviewed.`);
+    }
+  }
+
+  const raw = applyCritique(assemble({ scanId: o.scanId, c, understanding, strategy, captures, evidence, usage: o.usage, stats: o.stats, warnings: o.warnings, t0: o.t0 }), critique, evidence, o.usage.models.critic);
   const names = new Map<string, string>([...raw.pages.map((p) => [p.id, `“${p.title}”`] as const), ...raw.conversionAssets.map((a) => [a.id, `“${a.label}”`] as const)]);
-  const bp = stripEvidenceIds(raw, "", names);
+  // a question's basis names its source: E-ids become a short quote there (elsewhere they are removed)
+  // basis relevance: a cited line must share real content with the question (a price quote doesn't support a layout question)
+  for (const sx of raw.suggestedExperiences) for (const q of sx.questionPlan) {
+    if (!q.basis) continue;
+    const ids = q.basis.match(/\bE\d{1,4}\b/g) ?? [];
+    if (!ids.length) continue;
+    const qs = stems(`${q.question} ${q.options?.join(" ") ?? ""} ${FIELD_CATALOG[q.fieldKey]?.label ?? ""}`);
+    const relevant = ids.filter((id) => {
+      const ev = evidence.find((e) => e.id === id);
+      if (!ev) return false;
+      const pg = c.pages.find((p) => p.id === ev.pageId);
+      if (pg && (pg.group === "commercial" || /commercial/.test(pg.path)) && !/commercial/i.test(`${sx.label} ${q.question}`)) return false;
+      return [...stems(ev.text)].some((w) => qs.has(w));
+    });
+    if (!relevant.length) q.basis = undefined;
+    else for (const id of ids) if (!relevant.includes(id)) q.basis = q.basis.replace(id, "").replace(/\s{2,}/g, " ").trim();
+  }
+  for (const sx of raw.suggestedExperiences) for (const q of sx.questionPlan) {
+    if (q.basis) q.basis = q.basis.replace(/\bE\d{1,4}\b/g, (id) => { const t = evidence.find((e) => e.id === id)?.text; return t ? `“${t.length > 70 ? t.slice(0, 69) + "…" : t}”` : id; });
+    const fr = raw.frictions.find((f) => f.id === q.basis);
+    if (fr) q.basis = `Friction: ${fr.visitorQuestion}`;
+  }
+  // mechanical checks: placeholders, prices that aren't on the website, duplicate entries, empty bridges
+  const siteText = c.pages.map((p) => [p.digest.title, ...p.digest.h1, ...p.digest.headings.map((h) => h.text), ...p.digest.blocks, ...p.digest.priceMentions.map((m) => (typeof m === "string" ? m : JSON.stringify(m)))].join("\n")).join("\n");
+  const checked = checkContent(raw, siteText);
+  if (checked.removed.length) {
+    checked.bp.gateDecisions = [...checked.bp.gateDecisions, { id: `g-${checked.bp.gateDecisions.length + 1}`, rule: "CONTENT", label: `Unfinished or unverifiable wording removed (${checked.removed.length})`, note: clip(checked.removed.slice(0, 3).join("; "), 240), evidence: [] }];
+  }
+  if (checked.flagged.length) checked.bp.diagnostics.limitations = [...checked.bp.diagnostics.limitations, ...checked.flagged.map((f) => `Check: ${f}`)];
+  const bp = stripEvidenceIds(checked.bp, "", names);
   const v = validateBlueprint(bp);
   if (!v.ok) throw new Error(`Blueprint failed validation: ${v.errors.slice(0, 3).join("; ")}`);
-  return { blueprint: v.blueprint, understanding, strategy, evidence, understandingOk: !!understanding, strategyOk: !!strategy };
+  return { blueprint: v.blueprint, understanding, strategy, evidence, understandingOk: !!understanding, strategyOk: !!strategy, trail };
 }
 
 const ID_LIST = String.raw`E\d{1,4}(?:(?:\s*,\s*|\s+and\s+|\s*&\s*)E\d{1,4})*`;
@@ -326,6 +395,55 @@ export function stripEvidenceIds<T>(v: T, key = "", names: Map<string, string> =
   if (Array.isArray(v)) return v.map((x) => stripEvidenceIds(x, key, names)) as T;
   if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, stripEvidenceIds(x, k, names)])) as T;
   return v;
+}
+
+const GENERIC_WORDS = new Set(["bathroom", "bathrooms", "renovation", "renovations", "renovate", "project", "your", "with", "this", "that", "what", "which", "have", "about", "from", "will", "would", "are", "planning", "looking", "current", "sydney", "home", "space", "their", "they", "them", "more", "help", "also", "make", "need", "needs"]);
+/** content stems (first 5 letters of non-generic words) — a cheap relevance check between a claim and its evidence */
+export const stems = (t: string) => new Set(t.toLowerCase().match(/[a-z]{4,}/g)?.filter((w) => !GENERIC_WORDS.has(w)).map((w) => w.slice(0, 5)) ?? []);
+
+/** Critic ranking decides the order; rejected ideas are held back WITH the reason (never silently deleted). */
+export function applyCritique(bp: Blueprint, cq0: Critique | null, evidence: EvidenceItem[], model?: string): Blueprint {
+  if (!cq0) return bp;
+  const q = (t: string) => t.replace(/\(?\bE\d{1,4}\b(?:\s*[–,-]\s*E\d{1,4}\b)*\)?/g, (m) => {
+    const id = m.match(/E\d{1,4}/)![0];
+    const e = evidence.find((x) => x.id === id);
+    return e ? `“${e.text.length > 60 ? e.text.slice(0, 59) + "…" : e.text}”` : "";
+  });
+  const cq: Critique = {
+    ...cq0, summary: q(cq0.summary), architectureNote: cq0.architectureNote ? q(cq0.architectureNote) : cq0.architectureNote,
+    entries: cq0.entries.map((x) => ({ ...x, issues: x.issues.map(q), fix: x.fix ? q(x.fix) : x.fix })),
+    missed: cq0.missed.map((m) => ({ ...m, why: q(m.why) })),
+  };
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const find = (label: string) => cq.entries.find((x) => norm(x.label) === norm(label)) ?? cq.entries.find((x) => norm(x.label).includes(norm(label)) || norm(label).includes(norm(x.label)));
+  const held: { label: string; reason: string }[] = [];
+  let list = bp.suggestedExperiences.map((s) => {
+    const r = find(s.label);
+    if (!r) return s;
+    const scores = Object.fromEntries(Object.entries(r.scores).filter(([, v]) => typeof v === "number")) as Record<string, number>;
+    return { ...s, critic: { rank: r.rank, verdict: r.verdict, scores, issues: r.issues, fix: r.fix ?? undefined } };
+  });
+  list = list.filter((s) => {
+    if (s.critic?.verdict !== "reject") return true;
+    held.push({ label: s.label, reason: s.critic.issues[0] ?? "Rejected by the critical review." });
+    return false;
+  });
+  list.sort((a, b) => (a.critic?.rank ?? 9) - (b.critic?.rank ?? 9) || (a.priority ?? 9) - (b.priority ?? 9));
+  list = list.map((s, i) => ({ ...s, priority: i + 1 }));
+  const kept = new Set(list.map((s) => s.id));
+  const toEvidence = (ids: string[]) => ids.map((id) => evidence.find((e) => e.id === id)).filter(Boolean).map((e) => ({ kind: "text" as const, pageId: e!.pageId, url: bp.pages.find((p) => p.id === e!.pageId)?.url ?? bp.website.url, quote: e!.text.slice(0, 300) }));
+  return {
+    ...bp,
+    suggestedExperiences: list,
+    suggestedConnections: bp.suggestedConnections.filter((cn) => kept.has(cn.fromSuggestionId) && (cn.to.kind !== "suggestion" || kept.has(cn.to.id))),
+    assetActions: bp.assetActions.map((a) => (a.relatedSuggestionId && !kept.has(a.relatedSuggestionId) ? { ...a, relatedSuggestionId: undefined } : a)),
+    opportunityInventory: bp.opportunityInventory.map((o) => (o.entryId && !kept.has(o.entryId) ? { ...o, entryId: undefined } : o)),
+    recommendationCount: bp.recommendationCount ? { ...bp.recommendationCount, count: list.length } : undefined,
+    critique: {
+      model: model ?? "critic", summary: cq.summary.slice(0, 520), architectureNote: cq.architectureNote?.slice(0, 320) ?? undefined, held,
+      missed: cq.missed.map((m) => ({ label: m.label, why: m.why, evidence: toEvidence(m.evidenceIds) })),
+    },
+  };
 }
 
 function humanError(e: Error): string {
@@ -587,7 +705,37 @@ function assemble(a: AssembleArgs): Blueprint {
           usage: def.requiresConfirmation ? ("needs_confirmation" as const) : reuse ? ("could_reuse_later" as const) : ("may_collect" as const), reuseIn: opt(reuse),
         };
       }),
-      evidence: toEvidence(e.evidenceIds),
+      ...(() => {
+        // an entry may only REPLACE an existing asset that shows clear observed weaknesses; otherwise it complements it
+        if (e.action !== "replace") return {};
+        const targets = [e.conversionTargetAssetId, ...e.touchpoints.map((t) => t.assetId)].filter(Boolean) as string[];
+        const weak = (u?.assetReviews ?? []).some((r) => (targets.length ? targets.includes(r.assetId) : true) && (r.weaknesses.length >= 2 || r.contextFit === "mismatch"));
+        return weak ? {} : { action: "complement" as const };
+      })(),
+      role: e.role ?? undefined, priority: e.priority ?? undefined, stages: [...new Set(e.stages ?? [])],
+      interactionType: e.interactionType ?? undefined,
+      motivation: opt(e.motivation) ? clip(e.motivation!, 220) : undefined, promise: opt(e.promise) ? clip(e.promise!, 220) : undefined,
+      decisionsResolved: (e.decisionsResolved ?? []).map((x) => clip(x, 180)), outcome: opt(e.outcome) ? clip(e.outcome!, 240) : undefined,
+      implementationReadiness: e.readiness ?? undefined, requirements: (e.requirements ?? []).map((x) => clip(x, 200)),
+      whyNotSimpler: opt(e.whyNotSimpler) ? clip(e.whyNotSimpler!, 240) : undefined, whyNotMoreComplex: opt(e.whyNotMoreComplex) ? clip(e.whyNotMoreComplex!, 240) : undefined,
+      specificToBusiness: opt(e.specificToBusiness) ? clip(e.specificToBusiness!, 260) : undefined,
+      sourceContentIds: e.sourceContentIds.filter((x) => (u?.contentAssets ?? []).some((ca) => ca.id === x)),
+      ...(() => {
+        // entry evidence must relate to what the entry claims (a commercial page doesn't support a residential price tier)
+        const claim = stems(`${e.label} ${e.headline} ${e.promise ?? ""} ${e.motivation ?? ""} ${e.specificToBusiness ?? ""} ${e.coverageGap} ${e.currentState} ${e.questionPlan.map((x) => x.question).join(" ")} ${e.contextVariants.map((v) => v.startingHook).join(" ")}`);
+        const entryIsCommercial = /commercial/i.test(`${e.label} ${e.headline}`);
+        const related = e.evidenceIds.filter((id) => {
+          const ev = evById.get(id);
+          if (!ev) return false;
+          // page-level: evidence from a commercial page can't support a residential idea (and vice versa)
+          const pg = pageById.get(ev.pageId);
+          if (pg && (pg.group === "commercial" || /commercial/.test(pg.path)) !== entryIsCommercial) return false;
+          return [...stems(ev.text)].filter((w) => claim.has(w)).length >= 2;
+        });
+        return related.length
+          ? { evidence: toEvidence(related) }
+          : { evidence: toEvidence(e.evidenceIds), riskFlags: [...e.riskFlags.map((x) => clip(x, 200)), "The cited website evidence only loosely supports this idea — check before relying on it."].slice(0, 5) };
+      })(),
       reasoning: e.reasoning.map((r) => clip(r, 240)),
       confidence: e.confidence,
       openQuestions: e.openQuestions.map((q) => clip(q, 220)),
@@ -600,16 +748,23 @@ function assemble(a: AssembleArgs): Blueprint {
     .filter((x) => assetIds.has(x.assetId) && pageById.has(x.pageId))
     // someone else's linked tool is never bridged/replaced/removed by our proposal
     .filter((x) => conversionAssets.find((y) => y.id === x.assetId)?.ownership !== "linked_third_party" || x.proposal === "keep")
-    // established paths (calculator, booking, guided multi-step) are preserved: no bridge/replace/remove
+    // established paths may be improved or even replaced — but only on OBSERVED weaknesses (asset review);
+    // without them a replace/remove is softened to "improve" (a deliberate owner decision either way)
     .map((x) => {
       const k = conversionAssets.find((y) => y.id === x.assetId)?.kind;
       const asset = conversionAssets.find((y) => y.id === x.assetId);
-      if ((k === "calculator" || k === "booking" || k === "multi_step_form") && x.proposal !== "keep" && x.proposal !== "redirect")
-        return { ...x, proposal: "keep" as const, rationale: `Keep as it is — an established path we don't reroute. (${x.rationale})` };
+      const review = u?.assetReviews.find((r) => r.assetId === x.assetId);
+      // a free-text field or a short form is not evidence of poor UX: replacing needs ≥2 observed weaknesses or a mismatch
+      const observedWeak = (review?.weaknesses.length ?? 0) >= 2 || review?.contextFit === "mismatch";
+      if ((x.proposal === "replace" || x.proposal === "remove") && !observedWeak)
+        return { ...x, proposal: "improve" as const, rationale: `Improve rather than replace — we couldn't observe clear weaknesses. (${x.rationale})` };
+      if ((k === "calculator" || k === "booking" || k === "multi_step_form") && x.proposal === "bridge")
+        return { ...x, proposal: "keep" as const, rationale: `Keep the direct path; the new experience can sit beside it. (${x.rationale})` };
       // a bridge inserts a step before the existing destination: only for secondary CTA links,
       // never on forms or on the site-wide main CTA (no mandatory intermediate funnel)
       if (x.proposal === "bridge" && (k !== "cta_link" || asset?.siteWide))
         return { ...x, proposal: "keep" as const, rationale: `Keep it direct; the new experience can sit beside it instead. (${x.rationale})` };
+      void k;
       return x;
     })
     .map((x, i) => ({ id: `aa-${i + 1}`, assetId: x.assetId, pageId: x.pageId, proposal: x.proposal, rationale: clip(x.rationale, 240), relatedSuggestionId: sxByLabel(x.relatedEntry) }));
@@ -625,7 +780,10 @@ function assemble(a: AssembleArgs): Blueprint {
     const toEntry = !!toS;
     // bridges/reuse only between entries; links to existing assets never transfer data
     const mode = toEntry ? (cn.mode === "external_link" ? "explicit_bridge" : cn.mode) : cn.mode === "manual_summary" ? "manual_summary" : "external_link";
-    const shared = toEntry ? cn.sharedFieldKeys.filter((k) => k in FIELD_CATALOG) : [];
+    // bridges carry every semantically compatible answer both entries plan to use (not only what the model listed)
+    const fieldsOf = (sid?: string) => new Set(suggestedExperiences.find((s) => s.id === sid)?.possibleProjectFields.map((f) => f.key) ?? []);
+    const compatible = toEntry ? [...fieldsOf(from)].filter((k) => fieldsOf(toS).has(k) && !["contact", "context", "derived"].includes(FIELD_CATALOG[k]?.semantics ?? "")) : [];
+    const shared = toEntry ? [...new Set([...cn.sharedFieldKeys.filter((k) => k in FIELD_CATALOG), ...compatible])] : [];
     const unavailable = toEntry ? [] : cn.sharedFieldKeys.filter((k) => k in FIELD_CATALOG).map(fieldLabel);
     const constraints = [...cn.constraints.map((x) => clip(x, 200))];
     if (!toEntry && !constraints.some((x) => /transfer|integration|not passed/i.test(x))) constraints.push("A link only — answers are not passed to this form unless an integration is set up.");
@@ -636,7 +794,9 @@ function assemble(a: AssembleArgs): Blueprint {
       possibleSharedFields: shared, missingFields: cn.missingFieldKeys.filter((k) => k in FIELD_CATALOG).map(fieldLabel), constraints: constraints.slice(0, 3),
       mode, feasibility: cn.feasibility, unavailableFields: unavailable,
       requiresValidation: true, integrationStatus: toEntry ? "concept_only" : "link_only", rationale: clip(cn.reason, 240), evidence: [],
+      motivation: opt(cn.motivation) ? clip(cn.motivation!, 220) : undefined,
     });
+    if (cn.conditions?.length) suggestedConnections.at(-1)!.constraints = [...suggestedConnections.at(-1)!.constraints, ...cn.conditions.map((x) => clip(x, 200))].slice(0, 4);
   }
   for (const s of suggestedExperiences) {
     if (s.conversionTargetAssetId && !suggestedConnections.some((x) => x.fromSuggestionId === s.id && x.to.kind === "existing_asset")) {
@@ -649,6 +809,15 @@ function assemble(a: AssembleArgs): Blueprint {
   gated.entries.forEach((e, i) => e.opportunityIds.forEach((o) => entryIdByOpp.set(o, suggestedExperiences[i]?.id)));
   const opportunityInventory: Blueprint["opportunityInventory"] = (strategy?.opportunities ?? []).map((x) => ({
     id: slug(x.id, 20), label: clip(x.label, 60), contextIds: x.contextIds, decisionGap: clip(x.decisionGap, 220), action: x.action, support: x.support, note: opt(x.note) ? clip(x.note!, 220) : undefined, entryId: entryIdByOpp.get(x.id),
+    sourcePageIds: x.sourcePageIds.filter((p) => pageById.has(p)), sourceAssetIds: x.sourceAssetIds.filter((p) => assetIds.has(p)),
+    sourceContentIds: x.sourceContentIds.filter((id) => (u?.contentAssets ?? []).some((ca) => ca.id === id)),
+    stage: x.stage ?? undefined, observedSignal: opt(x.observedSignal) ? clip(x.observedSignal!, 240) : undefined,
+    visitorIntent: opt(x.visitorIntent) ? clip(x.visitorIntent!, 200) : undefined, transformation: opt(x.transformation) ? clip(x.transformation!, 260) : undefined,
+    interactionType: x.interactionType ?? undefined,
+    minimumIntervention: opt(x.minimumIntervention) ? clip(x.minimumIntervention!, 220) : undefined, richerAlternative: opt(x.richerAlternative) ? clip(x.richerAlternative!, 220) : undefined,
+    value: x.value ?? undefined, readiness: x.support === "unsupported" ? ("future" as const) : (x.readiness ?? undefined),
+    requirements: (x.requirements ?? []).map((r) => clip(r, 160)), assumptions: (x.assumptions ?? []).map((r) => clip(r, 160)),
+    evidence: toEvidence(x.evidenceIds),
   }));
   const reasonFor = (s: string) => (s === "unsupported" ? "unsupported_scope" : "needs_owner_input") as Blueprint["unsupportedOpportunities"][number]["reason"];
   const unsupportedOpportunities: Blueprint["unsupportedOpportunities"] = [
@@ -659,7 +828,6 @@ function assemble(a: AssembleArgs): Blueprint {
     .slice(0, 8).map((o, i) => ({ id: `op-${i + 1}`, label: clip(o.label, 60), reason: o.reason, note: clip(o.note, 240), evidence: [] }));
 
   const gateDecisions: Blueprint["gateDecisions"] = [
-    ...(calcIds.length ? [{ rule: "N-02", label: "No second cost calculator", note: "Your website already has a working calculator — we build around it, not next to it." }] : []),
     ...gated.decisions,
     ...(strategy?.notSuggested ?? []).map((n) => ({ rule: "LLM", label: n.label, note: n.note })),
   ].filter((g, i, arr) => arr.findIndex((y) => y.label.toLowerCase() === g.label.toLowerCase()) === i)
@@ -685,6 +853,17 @@ function assemble(a: AssembleArgs): Blueprint {
     pages: bpPages, pageGroups, services, businessClaims, conversionAssets, conversionStrategy, coverage, journeys,
     suggestedExperiences, assetActions, suggestedConnections, unsupportedOpportunities, gateDecisions,
     contexts, frictions, opportunityInventory,
+    architecture: strategy?.architecture ? {
+      chosen: clip(strategy.architecture.chosen, 220), rationale: clip(strategy.architecture.rationale, 420),
+      alternatives: strategy.architecture.alternatives.map((x) => ({ key: clip(x.key, 20), label: clip(x.label, 80), fit: x.fit, why: clip(x.why, 240) })),
+      motivations: strategy.architecture.motivations.map((m) => ({ motivation: clip(m.motivation, 100), pageIds: m.pageIds.filter((p) => pageById.has(p)), servedBy: m.servedBy, entryId: sxByLabel(m.entry), note: clip(m.note, 220) })),
+    } : undefined,
+    contentAssets: (u?.contentAssets ?? []).filter((x) => pageById.has(x.pageId)).map((x) => ({ id: x.id, pageId: x.pageId, kind: x.kind, label: clip(x.label, 100), whatItShows: clip(x.whatItShows, 200), evidence: toEvidence(x.evidenceIds) })),
+    assetReviews: (u?.assetReviews ?? []).filter((x) => assetIds.has(x.assetId)).map((x) => ({
+      assetId: x.assetId, strengths: x.strengths.map((t) => clip(t, 170)), weaknesses: x.weaknesses.map((t) => clip(t, 170)),
+      contextFit: x.contextFit, contextNote: opt(x.contextNote) ? clip(x.contextNote!, 200) : undefined, evidence: toEvidence(x.evidenceIds),
+    })),
+    readinessSignals: (u?.readinessSignals ?? []).map((x) => clip(x, 160)),
     recommendationCount: strategy ? { count: suggestedExperiences.length, rationale: clip(strategy.recommendationCount.rationale + (strategy.recommendationCount.count !== suggestedExperiences.length ? ` (${strategy.recommendationCount.count - suggestedExperiences.length} removed by our checks)` : ""), 400) } : undefined,
     importantUninspected: c.importantUninspected,
     visitorDecisions: (u?.contexts ?? []).filter((x) => x.unresolvedDecisions.length).slice(0, 8).map((x) => ({

@@ -36,7 +36,7 @@ npm start & npm run smoke
 | Evidence | typed verbatim sentences with ids (E1…); the LLM cites ids, never writes quotes | no |
 | Understand | 1 call (`google/gemini-3.1-flash-lite-preview`): business, offerings, facts incl. exclusions, conversion, 3–8 customer/project contexts with decisions, constraints, coverage and V1 support; follow-up pages → 1 delta call merged field-wise | yes |
 | Capture | desktop + mobile screenshots of ~5 key pages, measured CTA/form/section boxes (runs in parallel with Understand) | no |
-| Strategy | 1 call (`google/gemini-3-flash-preview`): opportunities per context → consolidation → 0–3 entries with context variants, question plan, project data contract, touchpoints, connection modes | yes |
+| Strategy | 1 call (`google/gemini-3.1-pro-preview`): opportunities per context → consolidation → 0–3 entries with context variants, question plan, project data contract, touchpoints, connection modes | yes |
 | Gates | redundant estimator (N-02), unsupported scope per variant, capabilities, forbidden hooks, pricing boundary, field catalog, evidence, established paths kept, handoff honesty, context fidelity | no |
 
 Measured cost (real OpenRouter usage): 3 LLM calls, ~18k input tokens, about $0.024 per site; no model fallback (a failed call yields a labelled partial result). Frozen-input evaluation: `FROZEN_SET=v2 npx tsx scripts/eval.ts <variant>`, results in `docs/eval-v2.md`.

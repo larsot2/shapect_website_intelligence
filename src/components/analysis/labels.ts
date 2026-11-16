@@ -5,6 +5,9 @@ export const actionLabel = {
   improve: "Improve",
   connect: "Connect",
   reposition: "Reposition",
+  replace: "Replace",
+  complement: "Adds alongside",
+  invite: "Invitation",
   none: "Keep as is",
 } as const;
 
@@ -42,6 +45,8 @@ export const claimStatusText = {
 
 export const proposalLabel = {
   keep: "Keep",
+  improve: "Improve",
+  reposition: "Move",
   replace: "Replace",
   redirect: "Redirect",
   bridge: "Bridge",

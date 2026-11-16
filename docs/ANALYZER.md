@@ -7,7 +7,7 @@ Evaluation gegen die Baseline: `docs/eval-v2.md`.
 ## Grundprinzip
 
 - **Deterministisch zuerst, LLM nur für Bedeutung.** Fetchen, Seitenauswahl, Inventar (inkl. Ownership), Evidenz-Zeilen, Feld-Semantik, Scope-Normalisierung und alle Gates laufen ohne LLM.
-- **OpenRouter mit festen Gemini-Modellen**: Understanding `google/gemini-3.1-flash-lite-preview`, Strategy `google/gemini-3-flash-preview` (env: `OPENROUTER_*`, nur serverseitig). **Kein Modell-Fallback** — scheitert ein Call, gibt es ein ehrlich markiertes Teilergebnis.
+- **OpenRouter mit festen Gemini-Modellen**: Understanding `google/gemini-3.1-flash-lite-preview`, Strategy `google/gemini-3.1-pro-preview` (env: `OPENROUTER_*`, nur serverseitig). **Kein Modell-Fallback** — scheitert ein Call, gibt es ein ehrlich markiertes Teilergebnis.
 - **Echte Telemetrie**: Tokens (inkl. Reasoning) und Kosten kommen aus der OpenRouter-Usage (`usage.include`), pro Call geloggt. Keine Budget-Grenze, nur Messung.
 - **Das LLM schreibt keine Zitate**: Es zitiert Evidenz-IDs (`E1…`), die deterministisch auf wörtliche Seitentexte aufgelöst werden. Unbekannte IDs → Element verworfen bzw. „weak evidence“.
 - **Website-Inhalt ist untrusted input**: Er steht in den Prompts nur als Daten-Block; Anweisungen darin werden ignoriert.

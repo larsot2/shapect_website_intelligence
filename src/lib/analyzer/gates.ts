@@ -33,8 +33,12 @@ export interface GateResult {
 
 export const FORBIDDEN_HOOK_RE = /\b(guarantee[sd]?|guaranteed|instant(ly)?\s+(quote|price|estimate)|exact\s+(price|cost|quote)|binding\s+quote|fixed[- ]price\s+(quote\s+)?in\s+\d|in\s+(\d+|a few|two|three|five)\s+(minutes?|seconds?)\s+.*\b(quote|price)|(quote|price)\s+in\s+(\d+|a few)\s+(minutes?|seconds?)|cheapest|best price|no\.?\s?1|#1)\b/i;
 /** wording that implies Shapect calculates a price/estimate (not allowed without a confirmed pricing basis) */
-const PRICING_CLAIM_RE = /\b(estimate (your|the) (cost|price|budget)|calculate (your|the)? ?(cost|price|budget|quote)|your (price|quote|estimate) (is|will be)|get (a|your) (price|estimate) (now|instantly)|how much (it|this) will cost you|based on (your|the) (size|answers?|room|choices?)[^.?]{0,60}(cost|price|range|\$)|\{\{[^}]+\}\})/i;
+const PRICING_CLAIM_RE = /\b(estimate (your|the) (cost|price|budget)|calculate (your|the)? ?(cost|price|budget|quote)|your (price|quote|estimate) (is|will be)|get (a|your) (price|estimate) (now|instantly)|how much (it|this) will cost you|based on (your|the) (size|answers?|room|choices?)[^.?]{0,60}(cost|price|range|\$)|\{\{[^}]+\}\}|\[(tier|price|range|amount|x)\])/i;
+/** sensitive promises: funding eligibility/approval or a technical damage diagnosis */
+export const SENSITIVE_RE = /\b(eligib\w*|you (qualify|are approved)|approved for (ndis|funding)|guarantee(d)? (funding|approval)|diagnos\w* (your|the) (leak|mould|mold|damage|structure)|(no|not) (a )?(leak|mould|mold) (problem|issue)|safe to (keep|leave))\b/i;
 const ESTIMATOR_RE = /\b(estimat\w*|calculat\w*|cost\s+(planner|checker|tool)|price\s+(checker|tool|finder)|quote\s+(tool|builder|generator)|budget\s+(tool|calculator|estimator))\b/i;
+
+export const MAX_ENTRIES = 5;
 
 export function applyEntryGates(raw: StrategyEntry[], ctx: GateContext): GateResult {
   const decisions: GateDecision[] = [];
@@ -51,20 +55,27 @@ export function applyEntryGates(raw: StrategyEntry[], ctx: GateContext): GateRes
     if (e.conversionTargetAssetId && !ctx.knownAssetIds.has(e.conversionTargetAssetId)) e.conversionTargetAssetId = null;
     e.evidenceIds = e.evidenceIds.filter((x) => ctx.knownEvidenceIds.has(x));
 
-    // capabilities (N-05)
+    // capabilities (N-05): an idea that needs capabilities Shapect lacks is KEPT as a future opportunity, never shown as deployable
     const unsupported = e.capabilityKeys.filter((k) => !isSupportedCapability(k));
     e.capabilityKeys = e.capabilityKeys.filter(isSupportedCapability);
-    if (!e.capabilityKeys.length) {
-      opportunities.push({ label: e.label, reason: "missing_capability", note: `Would need something Shapect can't do yet (${unsupported.join(", ").replace(/_/g, " ")}).` });
+    const require = (r: string) => { e.requirements = [...new Set([...(e.requirements ?? []), r])].slice(0, 5); };
+    if (unsupported.length) {
+      e.readiness = e.capabilityKeys.length ? (e.readiness === "future" ? "future" : "conditional") : "future";
+      require(`Capabilities Shapect doesn't have yet: ${unsupported.join(", ").replace(/_/g, " ")}`);
+    }
+    if (!e.capabilityKeys.length && !unsupported.length) e.readiness = e.readiness ?? "conditional";
+
+    // estimators (N-02): a second calculator next to a working one is redundant; a REPLACEMENT is a deliberate
+    // owner decision and any personalised estimate needs confirmed pricing rules — so it is future, never ready
+    const isEstimator = ESTIMATOR_RE.test(text);
+    const pointsAtCalculator = !!e.conversionTargetAssetId && ctx.calculatorAssetIds.includes(e.conversionTargetAssetId);
+    if (ctx.hasRealCalculator && isEstimator && !pointsAtCalculator && e.action !== "replace" && e.action !== "improve") {
+      decisions.push({ rule: "N-02", label: "No second cost calculator", note: "You already have a calculator; a second one would compete with it. Improving or replacing it is a separate, deliberate choice." });
       continue;
     }
-    if (unsupported.length) e.riskFlags = [...e.riskFlags, `Parts need capabilities Shapect doesn't have yet: ${unsupported.join(", ").replace(/_/g, " ")}`].slice(0, 4);
-
-    // calculator: only a redundant estimator is blocked (N-02); improving/connecting around it is fine
-    const pointsAtCalculator = !!e.conversionTargetAssetId && ctx.calculatorAssetIds.includes(e.conversionTargetAssetId);
-    if (ctx.hasRealCalculator && e.action === "add" && ESTIMATOR_RE.test(text) && !pointsAtCalculator) {
-      decisions.push({ rule: "N-02", label: "No second cost calculator", note: "You already have a working calculator, so we don't suggest another one." });
-      continue;
+    if (isEstimator && e.action !== "improve") {
+      e.readiness = "future";
+      require("Confirmed pricing rules and price versions from the business (Business Foundation) — Shapect never invents prices");
     }
 
     // scope per context (N-04): drop only unsupported variants, keep the rest
@@ -85,7 +96,13 @@ export function applyEntryGates(raw: StrategyEntry[], ctx: GateContext): GateRes
       decisions.push({ rule: "N-07", label: `“${e.label}” wording removed`, note: "It promised something no one can guarantee (instant or guaranteed quotes)." });
       continue;
     }
-    e.contextVariants = e.contextVariants.filter((v) => !FORBIDDEN_HOOK_RE.test(v.startingHook));
+    e.contextVariants = e.contextVariants.filter((v) => !FORBIDDEN_HOOK_RE.test(v.startingHook) && !SENSITIVE_RE.test(v.startingHook));
+    const beforeS = e.questionPlan.length;
+    e.questionPlan = e.questionPlan.filter((q) => !SENSITIVE_RE.test(q.question));
+    if (e.questionPlan.length < beforeS || SENSITIVE_RE.test(`${e.headline} ${e.promise ?? ""} ${e.outcome ?? ""}`))
+      e.riskFlags = [...e.riskFlags, "Removed or flagged wording that implied eligibility, approval or a damage diagnosis."].slice(0, 4);
+    if (/\b(ndis|funding|insurance)\b/i.test(`${e.label} ${e.headline}`)) e.riskFlags = [...new Set([...e.riskFlags, "Helps visitors prepare only — eligibility and approval are decided by the funding body, not by this experience."])].slice(0, 4);
+    if (/\b(leak|mould|mold|water damage|repair)\b/i.test(`${e.label} ${e.headline} ${e.questionPlan.map((q) => q.question).join(" ")}`)) e.riskFlags = [...new Set([...e.riskFlags, "Describes symptoms only and points to an on-site inspection — no damage assessment."])].slice(0, 4);
     e.touchpoints = e.touchpoints.filter((t) => !FORBIDDEN_HOOK_RE.test(t.headline));
     const beforeQ = e.questionPlan.length;
     e.questionPlan = e.questionPlan.filter((q) => !PRICING_CLAIM_RE.test(q.question) && !FORBIDDEN_HOOK_RE.test(q.question));
@@ -117,9 +134,11 @@ export function applyEntryGates(raw: StrategyEntry[], ctx: GateContext): GateRes
     out.push(e);
   }
 
-  out.sort((a, b) => b.confidence - a.confidence);
-  for (const extra of out.slice(3)) decisions.push({ rule: "N-11", label: `“${extra.label}” held back`, note: "We show at most three ideas so the most useful ones stand out." });
-  return { entries: out.slice(0, 3), decisions, opportunities };
+  // main experience first, then by the strategist's priority, then confidence
+  const rank = (e: StrategyEntry) => (e.role === "main" ? 0 : 1) * 100 + (e.priority ?? 9) * 10 + (1 - e.confidence);
+  out.sort((a, b) => rank(a) - rank(b));
+  for (const extra of out.slice(MAX_ENTRIES)) decisions.push({ rule: "N-11", label: `“${extra.label}” held back`, note: `We show at most ${MAX_ENTRIES} experiences so the strongest ones stand out.` });
+  return { entries: out.slice(0, MAX_ENTRIES), decisions, opportunities };
 }
 
 /** Context fidelity: every supported/partial context is either addressed or explicitly noted. */
