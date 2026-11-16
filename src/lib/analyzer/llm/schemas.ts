@@ -117,6 +117,15 @@ export type UnderstandingDelta = z.infer<typeof UnderstandingDeltaSchema>;
 // ---------------------------------------------------------------- Strategy
 
 export const StrategySchema = z.object({
+  diagnosis: upTo(z.object({
+    id: z.string(),
+    visitorQuestion: s(160),
+    whyHardHere: s(240),
+    evidenceIds: ids(4),
+    contextIds: ids(4),
+    consequence: z.enum(["misfit_lead", "price_shock", "wasted_visit", "delay", "drop_off", "unprepared_consult", "other"]).catch("other"),
+    status: z.enum(["observed", "inferred"]).catch("inferred"),
+  }), 5).default([]),
   opportunities: upTo(z.object({
     id: z.string(),
     label: s(60),
@@ -130,6 +139,7 @@ export const StrategySchema = z.object({
   entries: upTo(z.object({
     label: s(48),
     opportunityIds: ids(6),
+    frictionIds: ids(4),
     action: z.enum(["add", "improve", "connect", "reposition", "none"]).catch("add"),
     headline: s(160),
     businessOutcome: s(200),
@@ -145,7 +155,7 @@ export const StrategySchema = z.object({
       pageIds: ids(4),
       startingHook: s(120),
       focus: optText(120),
-      additionalQuestions: upTo(z.object({ question: s(140), fieldKey: z.string(), when: optText(100), evidenceIds: ids(2) }), 3).default([]),
+      additionalQuestions: upTo(z.object({ question: s(140), fieldKey: z.string(), when: optText(100), purpose: z.enum(["route", "expectation", "prepare", "qualify"]).optional().catch(undefined), evidenceIds: ids(2) }), 3).default([]),
       fallbackIfUnknown: optText(120),
     }), 6).default([]),
     questionPlan: upTo(z.object({
@@ -154,6 +164,8 @@ export const StrategySchema = z.object({
       answerType: z.enum(["single_choice", "multi_choice", "yes_no", "text", "number", "unknown_ok"]).catch("single_choice"),
       options: upTo(s(40), 7).optional().nullable(),
       condition: optText(100),
+      purpose: z.enum(["route", "expectation", "prepare", "qualify"]).optional().catch(undefined),
+      basis: optText(120),
     }), 10).default([]),
     projectFields: upTo(z.object({ key: z.string(), reuseIn: optText(48) }), 10).default([]),
     conversionTargetAssetId: z.string().optional().nullable(),

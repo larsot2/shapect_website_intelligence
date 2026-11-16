@@ -189,7 +189,7 @@ export const ContextVariantSchema = z.object({
   pageIds: z.array(id).default([]),
   startingHook: z.string().max(160),
   focus: z.string().max(160).optional(),
-  additionalQuestions: z.array(z.object({ question: z.string().max(160), fieldKey: z.string(), when: z.string().max(120).optional() })).default([]),
+  additionalQuestions: z.array(z.object({ question: z.string().max(160), fieldKey: z.string(), when: z.string().max(120).optional(), purpose: z.enum(["route", "expectation", "prepare", "qualify"]).optional() })).default([]),
   fallbackIfUnknown: z.string().max(160).optional(),
 });
 export type ContextVariant = z.infer<typeof ContextVariantSchema>;
@@ -200,6 +200,10 @@ export const QuestionSchema = z.object({
   answerType: z.enum(["single_choice", "multi_choice", "yes_no", "text", "number", "unknown_ok"]),
   options: z.array(z.string().max(60)).optional(),
   condition: z.string().max(120).optional(),
+  /** why ask it before the consultation: changes the path, sets an expectation, prepares the quote, or checks fit */
+  purpose: z.enum(["route", "expectation", "prepare", "qualify"]).optional(),
+  /** the business fact or friction the question comes from */
+  basis: z.string().max(140).optional(),
 });
 
 export const ContextInsightSchema = z.object({
@@ -239,6 +243,8 @@ export const ExperienceSuggestionSchema = z.object({
   coverageGap: z.string().max(240).optional(),
   contextVariants: z.array(ContextVariantSchema).default([]),
   questionPlan: z.array(QuestionSchema).default([]),
+  /** ids of the visitor frictions (blueprint.frictions) this entry resolves */
+  resolvesFrictions: z.array(z.string()).default([]),
   riskFlags: z.array(z.string()).default([]),
   complexity: z.enum(["low", "medium", "high"]).optional(),
   /** Conceptual visitor flow of the proposed experience (2–4 steps) — not generated or activated. */
@@ -384,6 +390,17 @@ export const BlueprintSchema = z.object({
     warnings: z.array(z.string()),
   }).optional(),
   contexts: z.array(ContextInsightSchema).default([]),
+  /** Where visitors of this business are likely to misjudge, stall or arrive unprepared — each from a combination of site facts. */
+  frictions: z.array(z.object({
+    id: z.string(),
+    visitorQuestion: z.string().max(180),
+    whyHardHere: z.string().max(260),
+    consequence: z.enum(["misfit_lead", "price_shock", "wasted_visit", "delay", "drop_off", "unprepared_consult", "other"]),
+    contextIds: z.array(z.string()).default([]),
+    /** observed = every part evidenced; inferred = a plausible hypothesis */
+    status: z.enum(["observed", "inferred"]),
+    evidence: z.array(EvidenceSchema).default([]),
+  })).default([]),
   opportunityInventory: z.array(z.object({
     id: z.string(), label: z.string(), contextIds: z.array(z.string()).default([]), decisionGap: z.string(),
     action: z.enum(["add", "improve", "connect", "reposition", "none"]), support: SupportSchema, note: z.string().optional(),

@@ -523,6 +523,18 @@ function assemble(a: AssembleArgs): Blueprint {
     addressedBy: fidelity.addressedBy.get(x.id) ?? [],
   }));
 
+  // frictions: "observed" only if every cited id resolves to real page text
+  const ctxIds = new Set((u?.contexts ?? []).map((x) => x.id));
+  const frictions: Blueprint["frictions"] = (strategy?.diagnosis ?? []).map((f) => {
+    const ev = toEvidence(f.evidenceIds);
+    return {
+      id: f.id, visitorQuestion: clip(f.visitorQuestion, 180), whyHardHere: clip(f.whyHardHere, 260), consequence: f.consequence,
+      contextIds: f.contextIds.filter((c) => ctxIds.has(c)),
+      status: f.status === "observed" && ev.length > 0 && ev.length === f.evidenceIds.length ? ("observed" as const) : ("inferred" as const),
+      evidence: ev,
+    };
+  });
+
   // entries → suggestions
   const sxIdByLabel = new Map<string, string>();
   const suggestedExperiences: Blueprint["suggestedExperiences"] = gated.entries.map((e, i) => {
@@ -548,10 +560,11 @@ function assemble(a: AssembleArgs): Blueprint {
       experienceSteps: e.commonFlow.map((x) => ({ title: clip(x.title, 60), detail: clip(x.detail, 180) })),
       contextVariants: e.contextVariants.map((v) => ({
         contextId: v.contextId, pageIds: v.pageIds, startingHook: clip(v.startingHook, 160), focus: opt(v.focus) ? clip(v.focus!, 160) : undefined,
-        additionalQuestions: v.additionalQuestions.map((q) => ({ question: clip(q.question, 160), fieldKey: q.fieldKey, when: opt(q.when) ? clip(q.when!, 120) : undefined })),
+        additionalQuestions: v.additionalQuestions.map((q) => ({ question: clip(q.question, 160), fieldKey: q.fieldKey, when: opt(q.when) ? clip(q.when!, 120) : undefined, purpose: q.purpose ?? undefined })),
         fallbackIfUnknown: opt(v.fallbackIfUnknown) ? clip(v.fallbackIfUnknown!, 160) : undefined,
       })),
-      questionPlan: e.questionPlan.map((q) => ({ question: clip(q.question, 160), fieldKey: q.fieldKey, answerType: q.answerType, options: q.options?.map((x) => clip(x, 60)) ?? undefined, condition: opt(q.condition) ? clip(q.condition!, 120) : undefined })),
+      questionPlan: e.questionPlan.map((q) => ({ question: clip(q.question, 160), fieldKey: q.fieldKey, answerType: q.answerType, options: q.options?.map((x) => clip(x, 60)) ?? undefined, condition: opt(q.condition) ? clip(q.condition!, 120) : undefined, purpose: q.purpose ?? undefined, basis: opt(q.basis) ? clip(q.basis!, 140) : undefined })),
+      resolvesFrictions: e.frictionIds.filter((f) => frictions.some((x) => x.id === f)),
       capabilityKeys: e.capabilityKeys,
       pageContexts,
       touchpoints: e.touchpoints.map((t, ti) => {
@@ -671,7 +684,7 @@ function assemble(a: AssembleArgs): Blueprint {
     analysis: { startedAt: new Date(a.t0).toISOString(), finishedAt: now, provider: a.usage.provider ?? "openrouter", model: [a.usage.models.understanding, a.usage.models.strategy].filter(Boolean).join(" + ") || "none", promptVersion: PROMPT_VERSION },
     pages: bpPages, pageGroups, services, businessClaims, conversionAssets, conversionStrategy, coverage, journeys,
     suggestedExperiences, assetActions, suggestedConnections, unsupportedOpportunities, gateDecisions,
-    contexts, opportunityInventory,
+    contexts, frictions, opportunityInventory,
     recommendationCount: strategy ? { count: suggestedExperiences.length, rationale: clip(strategy.recommendationCount.rationale + (strategy.recommendationCount.count !== suggestedExperiences.length ? ` (${strategy.recommendationCount.count - suggestedExperiences.length} removed by our checks)` : ""), 400) } : undefined,
     importantUninspected: c.importantUninspected,
     visitorDecisions: (u?.contexts ?? []).filter((x) => x.unresolvedDecisions.length).slice(0, 8).map((x) => ({

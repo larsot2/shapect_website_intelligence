@@ -35,4 +35,4 @@ export const config = {
   httpCacheTtlMs: num("ANALYZER_HTTP_CACHE_TTL_MS", 12 * 3600_000),
 };
 
-export const PROMPT_VERSION = "wia-prompts-2026-11-16.2";
+export const PROMPT_VERSION = "wia-prompts-2026-11-16.3";

@@ -60,7 +60,7 @@ describe("URL handling & discovery heuristics", () => {
 
 describe("V2 gates", () => {
   const entry = (over: Partial<StrategyEntry>): StrategyEntry => ({
-    label: "Project Planner", opportunityIds: [], action: "add", headline: "Plan your bathroom before the visit",
+    label: "Project Planner", opportunityIds: [], frictionIds: [], action: "add", headline: "Plan your bathroom before the visit",
     businessOutcome: "b", visitorOutcome: "v", currentState: "c", coverageGap: "g", capabilityKeys: ["guided_questions", "conditional_questions"],
     support: "supported", consolidationRationale: "same goal", commonFlow: [{ title: "Project", detail: "a few questions" }],
     contextVariants: [{ contextId: "house", pageIds: ["home"], startingHook: "Planning a house bathroom?", focus: null, additionalQuestions: [], fallbackIfUnknown: null }],
