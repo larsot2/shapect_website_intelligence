@@ -30,6 +30,8 @@ export interface InvAsset {
   multiStep?: boolean;
   /** evidence text that exists verbatim on the page (for quote checks) */
   evidenceText: string;
+  /** own = part of the business's site; embedded_third_party = a vendor widget on their pages; linked_third_party = only a link to someone else's tool/site */
+  ownership?: "own" | "embedded_third_party" | "linked_third_party" | "unknown";
 }
 
 const slug = (s: string, max = 48) =>
@@ -52,6 +54,16 @@ export function assignPageIds(digests: { key: string; digest: PageDigest; group:
 
 const CALL_RE = /\b(call|phone|ring)\b/i;
 
+/** "monumentprojects.com.au" vs "monumentbathrooms.com.au" → same brand (sister domain), so the booking page is theirs. */
+export function sameBrand(a: string, b: string): boolean {
+  const brand = (h: string) => h.replace(/^www\./, "").split(".")[0].toLowerCase();
+  const x = brand(a), y = brand(b);
+  if (x === y) return true;
+  let i = 0;
+  while (i < Math.min(x.length, y.length) && x[i] === y[i]) i++;
+  return i >= 5;
+}
+
 export function buildInventory(pages: SitePage[]): InvAsset[] {
   const byKey = new Map(pages.map((p) => [p.key, p]));
   const assets = new Map<string, InvAsset>();
@@ -69,9 +81,9 @@ export function buildInventory(pages: SitePage[]): InvAsset[] {
     const d = p.digest;
     for (const c of d.ctas) {
       if (c.kind === "tel") {
-        add("phone", () => ({ id: "phone", kind: "phone", label: c.text.replace(/\s+/g, " ").slice(0, 40), targetUrl: c.href, siteWide: false, evidenceText: c.text }), { pageId: p.id, area: c.area, text: c.text });
+        add("phone", () => ({ id: "phone", kind: "phone", label: c.text.replace(/\s+/g, " ").slice(0, 40), targetUrl: c.href, siteWide: false, evidenceText: c.text, ownership: "own" }), { pageId: p.id, area: c.area, text: c.text });
       } else if (c.kind === "mailto") {
-        add("email", () => ({ id: "email", kind: "email", label: (c.href ?? "").replace(/^mailto:/i, "").split("?")[0], targetUrl: c.href?.split("?")[0], siteWide: false, evidenceText: c.text }), { pageId: p.id, area: c.area, text: c.text });
+        add("email", () => ({ ownership: "own" as const, id: "email", kind: "email", label: (c.href ?? "").replace(/^mailto:/i, "").split("?")[0], targetUrl: c.href?.split("?")[0], siteWide: false, evidenceText: c.text }), { pageId: p.id, area: c.area, text: c.text });
       } else if (c.href) {
         const targetKey = c.kind === "internal" ? dedupeKey(c.href) : c.href;
         const target = c.kind === "internal" ? byKey.get(targetKey) : undefined;
@@ -82,13 +94,18 @@ export function buildInventory(pages: SitePage[]): InvAsset[] {
         const bookingText = /\bbook\b.*\b(consult\w*|appointment|visit|call|meeting|time)\b|\bschedule\b/i.test(c.text);
         const pricingText = /price|estimat|quote|cost|calculat/i.test(c.text);
         // a link to "/bookings" labelled "Price guide & estimate" is not a booking calendar
-        const isBooking = bookingTool || (bookingPath && !pricingText) || (external && bookingText);
-        const bookingHref = bookingTool || bookingPath;
+        // external booking pages are booking destinations whatever the button says ("Free measure & quote");
+        // an internal "/bookings" page labelled "Price guide & estimate" is not a booking calendar
+        const isBooking = bookingTool || (external && (bookingPath || bookingText)) || (!external && bookingPath && !pricingText);
         const k = `cta:${targetKey}`;
         add(k, () => ({
-          id: "", kind: isBooking && (external || bookingHref) ? "booking" : external ? "third_party" : "cta_link", label: c.text, targetUrl: c.href,
+          id: "", kind: isBooking ? "booking" : external ? "third_party" : "cta_link", label: c.text, targetUrl: c.href,
           targetPageId: target?.id, siteWide: false, evidenceText: c.text,
+          ownership: !external ? "own" : sameBrand(new URL(c.href!).hostname, new URL(p.url).hostname) ? "own" : isBooking ? "unknown" : "linked_third_party",
         }), { pageId: p.id, area: c.area, text: c.text });
+        // any occurrence that is clearly a booking upgrades the asset
+        const a = assets.get(k);
+        if (a && isBooking && a.kind !== "booking") a.kind = "booking";
       }
     }
     for (const f of d.forms) {
@@ -97,13 +114,19 @@ export function buildInventory(pages: SitePage[]): InvAsset[] {
       add(`form:${kind}:${sig}`, () => ({
         id: "", kind, label: f.submitText ? `${kind === "calculator" ? "Calculator" : "Form"}: “${f.submitText}”` : kind === "calculator" ? "Calculator" : "Enquiry form",
         siteWide: false, fields: f.fields.map((x) => `${x.label.replace(/\s*\*+$/, "")}${x.required || /\*$/.test(x.label) ? "*" : ""}${x.type === "select" || x.type === "radio" ? ` (${x.type}${x.options?.length ? `: ${x.options.slice(0, 6).join(" / ")}` : ""})` : x.type === "file" ? " (file upload)" : ""}`),
-        submitText: f.submitText, provider: f.provider, hasUpload: f.hasUpload, multiStep: f.multiStep, evidenceText: f.submitText ?? f.fields[0]?.label ?? "",
+        submitText: f.submitText, provider: f.provider, hasUpload: f.hasUpload, multiStep: f.multiStep, evidenceText: f.submitText ?? f.fields[0]?.label ?? "", ownership: "own",
       }), { pageId: p.id, area: "main", text: f.submitText ?? "form" });
     }
     for (const t of d.tools) {
-      if (t.presence !== "embedded" || t.kind === "form" || t.kind === "reviews") continue;
+      if (t.kind === "form" || t.kind === "reviews") continue;
+      if (t.presence === "linked") {
+        // documented, never treated as the business's own tool
+        add(`linked:${t.name}`, () => ({ id: "", kind: "third_party", label: `${t.name} (linked)`, siteWide: false, provider: t.name, evidenceText: "", ownership: "linked_third_party" }), { pageId: p.id, area: "main", text: t.name });
+        continue;
+      }
       const kind: InvAsset["kind"] = t.kind === "booking" ? "booking" : t.kind === "calculator" ? "calculator" : t.kind === "chat" ? "chat" : "third_party";
-      add(`tool:${t.name}`, () => ({ id: "", kind, label: t.name, siteWide: false, provider: t.name, evidenceText: "" }), { pageId: p.id, area: "main", text: t.name });
+      const own = t.name === "Interactive calculator";
+      add(`tool:${t.name}`, () => ({ id: "", kind, label: t.name, siteWide: false, provider: t.name, evidenceText: "", ownership: own ? "own" : "embedded_third_party" }), { pageId: p.id, area: "main", text: t.name });
     }
   }
 

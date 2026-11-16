@@ -106,7 +106,7 @@ export type PageGroup = z.infer<typeof PageGroupSchema>;
 
 export const BusinessClaimSchema = withEvidenceRule({
   id,
-  topic: z.enum(["identity", "service", "segment", "region", "process", "exclusion", "price_reference", "license", "warranty", "contact"]),
+  topic: z.enum(["identity", "service", "segment", "region", "process", "exclusion", "condition", "price_reference", "license", "warranty", "contact"]),
   label: z.string(),
   value: z.string(),
   /** Claim that needs owner confirmation before it could ever be reused. */
@@ -139,6 +139,7 @@ export const ConversionAssetSchema = withEvidenceRule({
   fields: z.array(z.string()).optional(),
   /** What happens after the click — only what is demonstrable. */
   observedOutcome: z.string().optional(),
+  ownership: z.enum(["own", "embedded_third_party", "linked_third_party", "unknown"]).optional(),
 });
 export type ConversionAsset = z.infer<typeof ConversionAssetSchema>;
 
@@ -175,7 +176,51 @@ export const ProjectFieldSuggestionSchema = z.object({
   label: z.string(),
   semantics: z.enum(["preference", "fact", "choice"]),
   usage: z.enum(["may_collect", "could_reuse_later", "needs_confirmation"]),
+  /** V2: catalog semantics (context/derived/contact are never treated as visitor decisions) */
+  fieldSemantics: z.enum(["context", "preference", "choice", "fact", "derived", "contact"]).optional(),
+  requiresConfirmation: z.boolean().optional(),
+  reuseIn: z.string().optional(),
 });
+
+const SupportSchema = z.enum(["supported", "partial", "unsupported", "owner_review"]);
+
+export const ContextVariantSchema = z.object({
+  contextId: z.string(),
+  pageIds: z.array(id).default([]),
+  startingHook: z.string().max(160),
+  focus: z.string().max(160).optional(),
+  additionalQuestions: z.array(z.object({ question: z.string().max(160), fieldKey: z.string(), when: z.string().max(120).optional() })).default([]),
+  fallbackIfUnknown: z.string().max(160).optional(),
+});
+export type ContextVariant = z.infer<typeof ContextVariantSchema>;
+
+export const QuestionSchema = z.object({
+  question: z.string().max(160),
+  fieldKey: z.string(),
+  answerType: z.enum(["single_choice", "multi_choice", "yes_no", "text", "number", "unknown_ok"]),
+  options: z.array(z.string().max(60)).optional(),
+  condition: z.string().max(120).optional(),
+});
+
+export const ContextInsightSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  sourcePageIds: z.array(id).default([]),
+  facets: z.record(z.string(), z.string()).default({}),
+  customerIntent: z.string().optional(),
+  visitorDecisions: z.array(z.string()).default([]),
+  uniqueConstraints: z.array(z.object({ text: z.string(), status: z.enum(["observed", "to_confirm"]), evidence: z.array(EvidenceSchema).default([]) })).default([]),
+  requiredFieldKeys: z.array(z.string()).default([]),
+  existingCoverage: z.enum(["covered", "partial", "none", "unknown"]),
+  coverageNote: z.string().optional(),
+  conversionGoalAssetId: id.optional(),
+  support: SupportSchema,
+  differsBy: z.enum(["copy", "questions", "capability", "conversion", "unsupported"]),
+  evidence: z.array(EvidenceSchema).default([]),
+  /** set when no recommendation covers this context (context fidelity) */
+  addressedBy: z.array(z.string()).default([]),
+});
+export type ContextInsight = z.infer<typeof ContextInsightSchema>;
 
 export const ExperienceSuggestionSchema = z.object({
   id,
@@ -189,6 +234,13 @@ export const ExperienceSuggestionSchema = z.object({
   currentState: shortText.optional(),
   /** What the owner must confirm before this could ever be built. */
   prerequisites: z.array(shortText).default([]),
+  support: SupportSchema.optional(),
+  consolidationRationale: z.string().max(300).optional(),
+  coverageGap: z.string().max(240).optional(),
+  contextVariants: z.array(ContextVariantSchema).default([]),
+  questionPlan: z.array(QuestionSchema).default([]),
+  riskFlags: z.array(z.string()).default([]),
+  complexity: z.enum(["low", "medium", "high"]).optional(),
   /** Conceptual visitor flow of the proposed experience (2–4 steps) — not generated or activated. */
   experienceSteps: z.array(z.object({ title: z.string().min(1).max(60), detail: z.string().max(180) })).max(4).default([]),
   supportedRecipeKey: z.string().optional(),
@@ -235,6 +287,11 @@ export const ConnectionSuggestionSchema = z.object({
   integrationStatus: z.enum(["concept_only", "link_only", "unknown"]),
   /** Information the target would still need to ask for. */
   missingFields: z.array(z.string()).default([]),
+  /** V2: how continuity would work — bridge, independent reuse, plain link, or a summary the visitor carries */
+  mode: z.enum(["session_reuse", "explicit_bridge", "external_link", "manual_summary"]).optional(),
+  feasibility: z.enum(["possible", "needs_review", "not_supported"]).optional(),
+  /** fields that cannot be handed over (e.g. to an external form without integration) */
+  unavailableFields: z.array(z.string()).default([]),
   /** Limits on reuse, e.g. "pricing only with a confirmed pricing basis". */
   constraints: z.array(shortText).default([]),
   rationale: shortText,
@@ -279,7 +336,7 @@ export const BlueprintSchema = z.object({
   analysis: z.object({
     startedAt: z.string(),
     finishedAt: z.string(),
-    provider: z.string(), // "fixture" | e.g. "iaedu-agent"
+    provider: z.string(), // "fixture" | e.g. "openrouter/Google"
     model: z.string(),
     promptVersion: z.string(),
   }),
@@ -289,8 +346,10 @@ export const BlueprintSchema = z.object({
   businessClaims: z.array(BusinessClaimSchema),
   conversionAssets: z.array(ConversionAssetSchema),
   conversionStrategy: withEvidenceRule({
-    value: z.enum(["consultation", "calculation", "qualification", "appointment", "routing", "mixed", "unknown"]),
+    value: z.enum(["consultation", "calculation", "qualification", "appointment", "routing", "direct_contact", "mixed", "unknown"]),
     label: z.string(),
+    secondary: z.array(z.string()).optional(),
+    certainty: z.enum(["clear", "mixed", "unclear"]).optional(),
   }),
   coverage: z.array(CoverageSchema),
   journeys: z.array(JourneySchema).min(1),
@@ -318,9 +377,20 @@ export const BlueprintSchema = z.object({
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
     tokensEstimated: z.boolean(),
+    reasoningTokens: z.number().int().nonnegative().optional(),
+    costUsd: z.number().nonnegative().nullable().optional(),
+    models: z.record(z.string(), z.string()).optional(),
     networkMode: z.string(),
     warnings: z.array(z.string()),
   }).optional(),
+  contexts: z.array(ContextInsightSchema).default([]),
+  opportunityInventory: z.array(z.object({
+    id: z.string(), label: z.string(), contextIds: z.array(z.string()).default([]), decisionGap: z.string(),
+    action: z.enum(["add", "improve", "connect", "reposition", "none"]), support: SupportSchema, note: z.string().optional(),
+    entryId: z.string().optional(),
+  })).default([]),
+  recommendationCount: z.object({ count: z.number().int().min(0).max(3), rationale: z.string() }).optional(),
+  importantUninspected: z.array(z.object({ url: z.string(), label: z.string(), group: z.string(), reason: z.string() })).default([]),
   /** Customer decisions visitors try to make, with how well the site supports them. */
   visitorDecisions: z.array(z.object({
     decision: z.string(),

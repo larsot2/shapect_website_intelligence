@@ -27,7 +27,6 @@ export const config = {
   captureMaxHeight: { desktop: 7_000, mobile: 11_000 },
   renderFallbackMinChars: 350, // render with a browser when static HTML has less main text
   // ---- llm
-  llmMaxCalls: num("ANALYZER_LLM_MAX_CALLS", 5),
   llmMaxInputChars: num("ANALYZER_LLM_MAX_INPUT_CHARS", 50_000), // per call (~12k tokens)
   llmTimeoutMs: num("ANALYZER_LLM_TIMEOUT_MS", 240_000),
   // ---- storage

@@ -6,6 +6,8 @@
  */
 export const CAPABILITIES = {
   guided_questions: { supported: true, label: "Ask a few guided questions about the project" },
+  conditional_questions: { supported: true, label: "Ask different follow-up questions depending on earlier answers or the starting page" },
+  existing_calculator_handoff: { supported: true, label: "Point visitors to the business's existing calculator (link only, no data transfer)" },
   scope_summary: { supported: true, label: "Summarise the visitor's project for the business" },
   style_choices: { supported: true, label: "Let visitors choose styles (using the business's own images)" },
   preference_summary: { supported: true, label: "Summarise style or quality preferences (not product selections)" },

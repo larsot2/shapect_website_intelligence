@@ -1,7 +1,7 @@
 /**
  * CLI: run a full real analysis without the UI.
  *   npm run scan -- https://www.example.com.au/
- * Reads IAEDU_* from .env (server-side only). Writes data/scans/<id>/.
+ * Reads OPENROUTER_* from .env (server-side only). Writes data/scans/<id>/.
  */
 import fs from "node:fs";
 for (const line of (fs.existsSync(".env") ? fs.readFileSync(".env", "utf8") : "").split(/\r?\n/)) {

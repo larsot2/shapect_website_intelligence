@@ -249,22 +249,93 @@ export async function selectPages(st: CrawlState, onProgress: Progress): Promise
     .filter(([k, c]) => c.group !== "home" && !c.fetchError && (!c.clusterId || reps.has(k)) && GROUP_WEIGHT[c.group] > -5 && c.score > 0)
     .sort((a, b) => b[1].score - a[1].score);
   const target = Math.min(config.deepPagesMax, Math.max(6, Math.min(config.deepPagesTarget + Math.floor(Math.max(0, st.candidates.size - 60) / 40), config.deepPagesMax - config.followUpMax)));
+  // Coverage + novelty selection: start with home + the primary conversion target,
+  // then greedily add the page that brings the most NEW decision-relevant dimensions.
   const picked: string[] = [dedupeKey(st.homeUrl)];
+  const covered = new Set<string>(coverageTags(st.candidates.get(dedupeKey(st.homeUrl))!, true));
   const used: Partial<Record<PageGroup, number>> = {};
-  // pass 1: best page of each important group (coverage), pass 2: fill by score within quotas
-  for (const g of ["calculator", "pricing", "quote", "booking", "contact", "service", "commercial", "design", "projects", "faq", "about"] as PageGroup[]) {
-    const hit = pool.find(([k, c]) => c.group === g && !picked.includes(k));
-    if (hit && picked.length < target) { picked.push(hit[0]); used[g] = (used[g] ?? 0) + 1; }
+  const ctaTarget = pool.find(([, c]) => c.ctaLinked && ["quote", "contact", "booking", "calculator"].includes(c.group));
+  if (ctaTarget) { picked.push(ctaTarget[0]); coverageTags(ctaTarget[1]).forEach((t) => covered.add(t)); used[ctaTarget[1].group] = 1; }
+  // the core service page (e.g. /bathroom-renovations) is always read — it defines the main offer
+  const core = pool
+    .filter(([k, c]) => !picked.includes(k) && c.group === "service" && /bathroom[- ]renovation/i.test(new URL(c.url).pathname) && new URL(c.url).pathname.split("/").filter(Boolean).length <= 2)
+    .sort((a, b) => b[1].inlinks - a[1].inlinks || a[1].url.length - b[1].url.length)[0];
+  if (core) { picked.push(core[0]); coverageTags(core[1]).forEach((t) => covered.add(t)); used.service = 1; }
+  // FAQ and pricing pages carry business rules, exclusions and price references — read the best of each
+  for (const g of ["faq", "pricing"] as PageGroup[]) {
+    const best = pool.filter(([k, c]) => !picked.includes(k) && c.group === g).sort((a, b) => b[1].score - a[1].score)[0];
+    if (best) { picked.push(best[0]); coverageTags(best[1]).forEach((t) => covered.add(t)); used[g] = 1; }
   }
-  for (const [k, c] of pool) {
-    if (picked.length >= target) break;
-    if (picked.includes(k)) continue;
-    if ((used[c.group] ?? 0) >= (QUOTAS[c.group] ?? 1)) continue;
-    picked.push(k);
-    used[c.group] = (used[c.group] ?? 0) + 1;
+  const homeTitle = st.candidates.get(dedupeKey(st.homeUrl))?.signals?.title?.trim().toLowerCase();
+  const isHomeDuplicate = (c: Candidate) => /^\/(home|home-page|homepage|index)\/?$/i.test(new URL(c.url).pathname) || (!!homeTitle && c.signals?.title?.trim().toLowerCase() === homeTitle);
+  // context-rich sites may read a few more pages, but only while each still adds a lot
+  const stretch = Math.min(config.deepPagesMax - config.followUpMax, target + 2);
+  while (picked.length < stretch) {
+    let best: { k: string; c: Candidate; gain: number } | null = null;
+    for (const [k, c] of pool) {
+      if (picked.includes(k)) continue;
+      if (isHomeDuplicate(c)) continue;
+      if ((used[c.group] ?? 0) >= (QUOTAS[c.group] ?? 1) + 2) continue; // soft cap, novelty decides
+      const tags = coverageTags(c);
+      const novel = tags.filter((t) => !covered.has(t));
+      const relevance = Math.max(0.15, Math.min(1, c.score / 30)) * (GROUP_RELEVANCE[c.group] ?? 0.6);
+      const reusePenalty = (used[c.group] ?? 0) * (c.group === "service" ? 2 : 6);
+      const gain = novel.reduce((n, t) => n + tagWeight(t), 0) * 10 * relevance + c.score * 0.25 - reusePenalty;
+      if (!best || gain > best.gain) best = { k, c, gain };
+    }
+    if (!best || best.gain < 3 || (best.gain < 8 && picked.length >= 8)) break; // nothing new worth a deep read
+    if (picked.length >= target && best.gain < 28) break;
+    picked.push(best.k);
+    coverageTags(best.c).forEach((t) => covered.add(t));
+    used[best.c.group] = (used[best.c.group] ?? 0) + 1;
   }
   st.selected = picked;
   onProgress({ phase: "select", message: "Selected pages to read closely", detail: { selected: picked.length, found: st.candidates.size } });
+}
+
+/** Decision-relevant dimensions a page covers (cheap: URL, link text, title, headings, signals). */
+const TAG_WEIGHT: Record<string, number> = { prop: 3, persp: 2.5, svc: 2, conv: 3, tool: 3, info: 2, price: 2.5, seg: 3, design: 2.5, trust: 0.5, group: 1 };
+const TAG_RULES: [string, RegExp][] = [
+  ["prop:house", /\bhouses?\b|\bhome\b(?! renovations)/], ["prop:apartment", /\bapartments?\b|\bunits?\b/], ["prop:granny", /granny/], ["prop:townhouse", /townhouse/],
+  ["svc:ensuite", /ensuite/], ["svc:laundry", /laundr/], ["svc:kitchen", /kitchen/], ["svc:waterproof", /waterproof/], ["svc:structural", /structural|extension/],
+  ["persp:small", /\bsmall\b|compact/], ["persp:luxury", /luxury|premium/], ["persp:budget", /budget|affordable/], ["persp:accessible", /accessib|disab|ndis|elderly/],
+  ["seg:commercial", /commercial|strata|office|hospitality|retail/],
+  ["design:design", /design|style|inspiration|gallery|before and after|ideas/], ["svc:bathroom", /bathroom renovation/],
+  ["price", /cost|price|pricing|\$|package/], ["info:faq", /faq|question/], ["info:process", /process|how we work|what to expect/],
+];
+const TOPIC_PREFIXES = new Set(["prop", "persp", "svc", "seg", "design"]);
+const DECISION_GROUPS = new Set(["pricing", "calculator", "quote", "booking", "contact", "faq", "design", "projects", "service", "commercial"]);
+/** group novelty only counts for decision-relevant page types (not blog indexes, about, other) */
+const tagWeight = (t: string) => (t.startsWith("group:") ? (DECISION_GROUPS.has(t.slice(6)) ? 1 : 0) : TAG_WEIGHT[t.split(":")[0]] ?? 1);
+
+/** Deterministic topic of a page (URL slug + H1) — used as context hints for the LLM. */
+export function pageTopics(url: string, h1 = ""): string[] {
+  const primary = `${new URL(url).pathname.replace(/[-_/]+/g, " ")} ${h1}`.toLowerCase();
+  return TAG_RULES.filter(([t, re]) => TOPIC_PREFIXES.has(t.split(":")[0]) && t !== "svc:bathroom" && re.test(primary)).map(([t]) => t.split(":")[1]);
+}
+const GROUP_RELEVANCE: Partial<Record<PageGroup, number>> = { service: 1, commercial: 1, pricing: 1, calculator: 1, quote: 1, booking: 1, contact: 0.9, design: 0.85, projects: 0.8, faq: 0.9, about: 0.75, advice: 0.6, reviews: 0.6, blog: 0.45, location: 0.4, other: 0.45 };
+function coverageTags(c: Candidate, isHome = false): string[] {
+  const sg = c.signals;
+  // topic tags only from what the page is ABOUT (url, link text, title, h1) — not from things it merely mentions
+  // primary topic = URL slug + first H1; titles/link texts carry site-wide marketing words, so only as fallback
+  const primary = `${new URL(c.url).pathname.replace(/[-_/]+/g, " ")} ${sg?.h1[0] ?? ""}`.toLowerCase();
+  const hasTopic = TAG_RULES.some(([t, re]) => TOPIC_PREFIXES.has(t.split(":")[0]) && re.test(primary));
+  const topic = hasTopic ? primary : `${primary} ${c.texts[0] ?? ""} ${(sg?.title ?? "").split(/[|–-]/)[0]}`.toLowerCase();
+  const wide = `${topic} ${sg?.headings.slice(0, 10).map((h) => h.text).join(" ") ?? ""}`.toLowerCase();
+  const tags = TAG_RULES.filter(([t, re]) => {
+    const prefix = t.split(":")[0];
+    if (TOPIC_PREFIXES.has(prefix)) return !isHome && re.test(topic);
+    if (isHome && (prefix === "info" || prefix === "price")) return false; // the home page only mentions these
+    return re.test(wide);
+  }).map(([t]) => t);
+  if (sg?.forms.some((f) => f.looksLikeCalculator) || sg?.tools.some((t) => t.kind === "calculator" && t.presence === "embedded")) tags.push("tool:calculator");
+  if (sg?.tools.some((t) => t.kind === "booking" && t.presence === "embedded")) tags.push("tool:booking");
+  if (sg?.forms.some((f) => f.multiStep)) tags.push("conv:multistep");
+  if (sg?.forms.some((f) => f.hasUpload)) tags.push("conv:upload");
+  if (sg?.forms.some((f) => f.fields.length >= 4)) tags.push("conv:form");
+  if (sg?.priceMentions.length) tags.push("price:mentions");
+  tags.push(`group:${c.group}`);
+  return tags;
 }
 
 // ------------------------------------------------------------------ Stage C
