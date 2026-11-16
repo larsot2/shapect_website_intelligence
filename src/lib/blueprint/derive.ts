@@ -130,3 +130,14 @@ export function placementVerdicts(bp: Blueprint, rejected: Set<string> = new Set
 
 export const stepBasis = (step: Blueprint["journeys"][number]["steps"][number]): "observed" | "inferred" =>
   step.basis ?? (step.kind === "outcome" ? "inferred" : "observed");
+
+// ------------------------------------------------------------ priority (what first, what optional)
+
+export interface Priority { label: string; tone: "go" | "sky" | "amber"; hint: string }
+
+/** Suggestions are already ordered by strength; this turns order + confidence into plain guidance. */
+export function priorityOf(index: number, s: ExperienceSuggestion): Priority {
+  if (s.confidence < 0.6) return { label: "Only if relevant", tone: "amber", hint: "Weaker evidence — worth it only if it fits how you work." };
+  if (index === 0) return { label: "Best first step", tone: "go", hint: "Most value for your visitors with the least change to your process." };
+  return { label: "Next layer", tone: "sky", hint: "Builds on the first step once that works." };
+}

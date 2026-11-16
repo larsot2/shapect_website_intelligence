@@ -1,8 +1,8 @@
 import type { ReviewStatus } from "@/lib/review/review";
 
 export const actionLabel = {
-  add: "New experience",
-  improve: "Improve what you have",
+  add: "New",
+  improve: "Improve",
   connect: "Connect",
   reposition: "Reposition",
   none: "Keep as is",

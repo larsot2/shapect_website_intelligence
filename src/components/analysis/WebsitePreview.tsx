@@ -30,6 +30,9 @@ export function WebsitePreview() {
   const pageId = pagesWithShots.some((p) => p.id === params.get("page")) ? params.get("page")! : pagesWithShots[0]?.id;
   const vp: Viewport = params.get("vp") === "mobile" ? "mobile" : "desktop";
   const selectedKey = params.get("marker");
+  const [filter, setFilter] = useState<string>("all");
+  const groupsPresent = groupOrder.filter((g) => pagesWithShots.some((p) => p.group === g));
+  const suggestionCount = (pid: string) => bp.suggestedExperiences.filter((s) => decisionFor("suggestion", s.id)?.status !== "rejected" && s.touchpoints.some((t) => t.pageId === pid)).length;
 
   const setParams = (next: Record<string, string | null>) => {
     const sp = new URLSearchParams(params.toString());
@@ -113,20 +116,36 @@ export function WebsitePreview() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[200px_1fr_340px]">
-        {/* page list */}
+      <div className="grid gap-6 lg:grid-cols-[230px_1fr_340px]">
+        {/* page navigator: filter by page type, see where suggestions are */}
         <nav aria-label="Pages" className="lg:sticky lg:top-20 lg:self-start">
-          <ul className="flex gap-3 overflow-x-auto pb-2 lg:flex-col lg:overflow-visible">
-            {groupOrder.flatMap((g) => pagesWithShots.filter((p) => p.group === g)).map((p) => (
-              <li key={p.id} className="w-36 shrink-0 lg:w-auto">
-                <button type="button" onClick={() => setParams({ page: p.id, marker: null })} aria-current={p.id === pageId ? "page" : undefined}
-                  className={`w-full rounded-xl border p-1.5 text-left transition-colors ${p.id === pageId ? "border-ink bg-paper shadow-sm" : "border-transparent hover:border-line hover:bg-paper"}`}>
-                  <Shot pageId={p.id} vp={vp} className="aspect-[16/10] rounded-lg" sizes="200px" />
-                  <span className="block px-1 pt-1.5 text-[13px] font-medium">{p.title}</span>
-                  <span className="block px-1 text-[11px] text-ink-mute">{groupLabel[p.group]}</span>
+          {groupsPresent.length > 2 && (
+            <div className="mb-3 flex flex-wrap gap-1" role="radiogroup" aria-label="Filter pages">
+              {["all", ...groupsPresent].map((g) => (
+                <button key={g} type="button" role="radio" aria-checked={filter === g} onClick={() => setFilter(g)}
+                  className={`rounded-full px-2.5 py-1 text-[12px] font-medium ${filter === g ? "bg-ink text-white" : "bg-paper text-ink-soft ring-1 ring-line hover:text-ink"}`}>
+                  {g === "all" ? "All" : groupLabel[g as keyof typeof groupLabel]}
                 </button>
-              </li>
-            ))}
+              ))}
+            </div>
+          )}
+          <ul className="flex gap-2 overflow-x-auto pb-2 lg:flex-col lg:overflow-visible">
+            {groupOrder.flatMap((g) => pagesWithShots.filter((p) => p.group === g)).filter((p) => filter === "all" || p.group === filter).map((p) => {
+              const n = suggestionCount(p.id);
+              return (
+                <li key={p.id} className="w-52 shrink-0 lg:w-auto">
+                  <button type="button" onClick={() => setParams({ page: p.id, marker: null })} aria-current={p.id === pageId ? "page" : undefined}
+                    className={`flex w-full items-center gap-2.5 rounded-xl border p-1.5 text-left transition-colors ${p.id === pageId ? "border-ink bg-paper shadow-sm" : "border-transparent hover:border-line hover:bg-paper"}`}>
+                    <Shot pageId={p.id} vp={vp} className="aspect-[4/3] w-16 shrink-0 rounded-md" sizes="64px" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px] font-medium">{p.title}</span>
+                      <span className="block text-[11px] text-ink-mute">{groupLabel[p.group]}</span>
+                      {n > 0 && <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-go-soft px-1.5 text-[11px] font-medium text-go-ink"><Sparkles className="size-2.5" aria-hidden />{n} suggestion{n > 1 ? "s" : ""}</span>}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </nav>
 

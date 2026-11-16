@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, Check, CircleHelp, Clock, Eye, Lock, RotateCcw, Sparkles, ThumbsDown, Wrench } from "lucide-react";
+import { ArrowRight, Check, CircleHelp, Clock, Eye, Lock, RotateCcw, Sparkles, ThumbsDown, Wrench, Link2 } from "lucide-react";
 import type { ExperienceSuggestion } from "@/lib/blueprint/schema";
 import { Button, Chip, Drawer, SectionHeading } from "@/components/ui";
 import { editedText, useAnalysis } from "./AnalysisContext";
@@ -10,12 +10,20 @@ import { EvidenceList } from "./Evidence";
 import { Shot } from "./Shot";
 import { actionLabel, fieldUsageLabel, reviewLabel, reviewTone } from "./labels";
 import { incompleteParts } from "./PartialNotice";
-import { experienceSteps, placementVerdicts } from "@/lib/blueprint/derive";
+import { experienceSteps, placementVerdicts, priorityOf } from "@/lib/blueprint/derive";
 
 const capabilityText: Record<string, string> = {
   guided_questions: "Guided questions", scope_summary: "Project summary", style_choices: "Style choices", preference_summary: "Preference summary",
   budget_reference: "Your public price references", project_checklist: "Consultation checklist", existing_form_handoff: "Hands over to your form",
   existing_booking_handoff: "Links to your booking", form_improvement_advice: "Form advice", cta_placement_advice: "Button advice",
+};
+
+const actionHint: Record<string, string> = {
+  add: "Adds a step your website doesn't offer yet",
+  improve: "Makes something you already have work better",
+  connect: "Adds a step that leads into something you already have",
+  reposition: "Moves an existing entry point to a better place",
+  none: "Keep as it is",
 };
 
 type Panel = { kind: "review" | "why"; id: string } | null;
@@ -28,7 +36,19 @@ export function Recommendations() {
 
   return (
     <section aria-labelledby="rec-title">
-      <SectionHeading id="recommendations" eyebrow={`${list.length} of at most 3`} title="What we recommend" />
+      <div id="recommendations" className="mb-5 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 id="rec-title" className="text-[26px] font-semibold tracking-tight">Recommended experiences</h2>
+          <p className="mt-1 text-ink-soft">{list.length ? `${list.length} idea${list.length > 1 ? "s" : ""}, most useful first. You decide — nothing is built.` : ""}</p>
+        </div>
+        {list.length > 0 && (
+          <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-ink-mute" aria-label="What the labels mean">
+            <li title="Something your website doesn't offer yet"><Sparkles className="mr-1 inline size-3 text-go" aria-hidden />New = adds a missing step</li>
+            <li title="Makes something you already have work better"><Wrench className="mr-1 inline size-3 text-sky" aria-hidden />Improve = upgrades what you have</li>
+            <li title="Links a new step with what you already have"><Link2 className="mr-1 inline size-3 text-go" aria-hidden />Connect = adds a step before your existing one</li>
+          </ul>
+        )}
+      </div>
       {list.length === 0 && incompleteParts(bp).recommendations ? (
         <div className="rounded-2xl border border-dashed border-line bg-paper/60 p-8">
           <p className="text-lg font-semibold">No recommendations yet.</p>
@@ -56,7 +76,8 @@ function RecommendationCard({ s, index, onReview, onWhy }: { s: ExperienceSugges
   const { bp, asset, page, decisionFor, decide, undo, screenshot } = useAnalysis();
   const d = decisionFor("suggestion", s.id);
   const target = s.conversionTargetAssetId ? asset(s.conversionTargetAssetId) : undefined;
-  const ActionIcon = s.action === "improve" ? Wrench : Sparkles;
+  const ActionIcon = s.action === "improve" ? Wrench : s.action === "connect" ? Link2 : Sparkles;
+  const pr = priorityOf(index, s);
 
   if (d?.status === "rejected") {
     return (
@@ -75,15 +96,14 @@ function RecommendationCard({ s, index, onReview, onWhy }: { s: ExperienceSugges
   const lead = s.pageContexts.find((c) => screenshot(c.pageId)) ?? s.pageContexts[0];
   return (
     <article
+      id={`card-${s.id}`}
       data-testid={`card-${s.id}`}
-      className={`grid overflow-hidden rounded-2xl border bg-paper lg:grid-cols-[1fr_280px] ${index === 0 ? "border-ink/15 shadow-[0_18px_50px_-30px_rgba(18,26,31,.4)]" : "border-line"}`}
+      className={`grid scroll-mt-32 overflow-hidden rounded-2xl border bg-paper lg:grid-cols-[1fr_280px] ${index === 0 ? "border-go/40 shadow-[0_18px_50px_-30px_rgba(18,26,31,.4)] ring-1 ring-go/15" : "border-line"}`}
     >
       <div className="flex flex-col p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-2">
-          <Chip tone={s.action === "improve" ? "sky" : "go"}>
-            <ActionIcon className="size-3" aria-hidden /> {actionLabel[s.action]}
-          </Chip>
-          {s.confidence < 0.6 && <Chip tone="amber">Optional idea</Chip>}
+          <span title={pr.hint}><Chip tone={pr.tone} className="font-semibold">{index === 0 && pr.tone === "go" ? "★ " : ""}{pr.label}</Chip></span>
+          <span title={actionHint[s.action]}><Chip><ActionIcon className="size-3" aria-hidden /> {actionLabel[s.action]}</Chip></span>
           {d && <Chip tone={reviewTone[d.status]}>{reviewLabel[d.status]}</Chip>}
         </div>
         <h3 className="mt-3 text-[20px] font-semibold tracking-tight">{s.label}</h3>
@@ -339,10 +359,18 @@ function WhyDrawer({ s, onClose, onReview }: { s: ExperienceSuggestion; onClose:
       open
       onClose={onClose}
       title={`Why “${s.label}”?`}
-      subtitle="What we saw on your website, and how we read it."
+      subtitle="What we know from your website, and what we suggest because of it."
       footer={<Button variant="primary" onClick={onReview}>Review suggestion</Button>}
     >
-      <ol className="space-y-3">
+      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Eye className="size-4 text-go" aria-hidden /> What we know <span className="font-normal text-ink-mute">— quoted from your website</span></h3>
+      <EvidenceList items={s.evidence} />
+      {s.currentState && (
+        <p className="mt-4 flex gap-2 rounded-xl border border-dashed border-ink-mute/40 px-3 py-2.5 text-[14px] text-ink-soft">
+          <span className="shrink-0 text-[11px] font-semibold tracking-wide text-ink-mute uppercase">We infer</span>{s.currentState}
+        </p>
+      )}
+      <h3 className="mt-7 mb-3 flex items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-go" aria-hidden /> What we suggest — and why</h3>
+      <ol className="space-y-2.5">
         {s.reasoning.map((r, i) => (
           <li key={i} className="flex gap-3 text-[15px] leading-relaxed">
             <span className="grid size-6 shrink-0 place-items-center rounded-full bg-go-soft text-[12px] font-semibold text-go-ink">{i + 1}</span>
@@ -350,11 +378,7 @@ function WhyDrawer({ s, onClose, onReview }: { s: ExperienceSuggestion; onClose:
           </li>
         ))}
       </ol>
-      <h3 className="mt-8 mb-3 text-sm font-semibold">Seen on your website</h3>
-      <EvidenceList items={s.evidence} />
-      <p className="mt-6 text-[12px] text-ink-mute">
-        The quotes are observed. The recommendation itself is our suggestion — you decide.
-      </p>
+      <p className="mt-6 text-[12px] text-ink-mute">The quotes are observed. The recommendation is our suggestion — you decide.</p>
     </Drawer>
   );
 }

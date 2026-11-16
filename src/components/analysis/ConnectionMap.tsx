@@ -1,21 +1,26 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import { Link2Off, RotateCcw } from "lucide-react";
+import { ArrowRightLeft, Check, CircleHelp, Info, Link2Off, Lock, MapPin, RefreshCw, RotateCcw } from "lucide-react";
 import type { ConnectionSuggestion } from "@/lib/blueprint/schema";
-import { Button, Chip, SectionHeading } from "@/components/ui";
+import { Button, Chip } from "@/components/ui";
 import { useAnalysis } from "./AnalysisContext";
-import { connectionState, type Mechanism } from "@/lib/blueprint/derive";
+import { connectionState, priorityOf, type Mechanism } from "@/lib/blueprint/derive";
 
-type Edge = { from: string; to: string; style: "page" | "continuation" | "destination"; connectionId?: string };
-type Line = Edge & { d: string };
+type Line = { d: string; kind: "bridge" | "handover"; mid?: { x: number; y: number }; label?: string; id: string };
 
-const mechanismInfo: Record<Mechanism, { label: string; explain: string; tone: "go" | "neutral" | "sky" }> = {
-  bridge: { label: "Suggested bridge", explain: "A deliberate hand-over from one experience to another, offered to the visitor.", tone: "go" },
-  destination: { label: "Hand-over to your process", explain: "The experience ends in something you already have. Your process stays the same.", tone: "neutral" },
-  touchpoints: { label: "Same experience, several places", explain: "One experience with different starting points on different pages.", tone: "sky" },
+const mech: Record<Mechanism, { label: string; Icon: typeof Lock }> = {
+  bridge: { label: "Bridge", Icon: ArrowRightLeft },
+  destination: { label: "Hand-over to your process", Icon: Lock },
+  touchpoints: { label: "Same experience, several pages", Icon: MapPin },
 };
 
+/**
+ * Network view for owners: experiences (with where they appear) on the left,
+ * the business's existing process on the right. Dashed = bridge between
+ * experiences (with how many answers it could reuse), solid = hand-over into
+ * what already exists. Everything is a plan — nothing is connected.
+ */
 export function ConnectionMap() {
   const { bp, page, asset, decisionFor } = useAnalysis();
   const box = useRef<HTMLDivElement>(null);
@@ -23,45 +28,32 @@ export function ConnectionMap() {
   const [active, setActive] = useState<string | null>(null);
 
   const visible = bp.suggestedExperiences.filter((s) => decisionFor("suggestion", s.id)?.status !== "rejected");
-  const visibleIds = new Set(visible.map((s) => s.id));
-  const allPageIds = [...new Set(visible.flatMap((s) => s.pageContexts.map((c) => c.pageId)))];
-  const pageIds = allPageIds.slice(0, 6);
-  const morePages = allPageIds.length - pageIds.length;
-  const connections = bp.suggestedConnections.filter(
-    (c) => visibleIds.has(c.fromSuggestionId) && (c.to.kind === "existing_asset" || visibleIds.has(c.to.id)),
-  );
+  const ids = new Set(visible.map((s) => s.id));
+  const connections = bp.suggestedConnections.filter((c) => ids.has(c.fromSuggestionId) && (c.to.kind === "existing_asset" || ids.has(c.to.id)));
   const destIds = [...new Set(connections.filter((c) => c.to.kind === "existing_asset").map((c) => c.to.id))];
-
-  const edges: Edge[] = [
-    ...visible.flatMap((s) => s.pageContexts.filter((c) => pageIds.includes(c.pageId)).map((c) => ({ from: `p:${c.pageId}`, to: `s:${s.id}`, style: "page" as const }))),
-    ...connections.map((c) => ({
-      from: `s:${c.fromSuggestionId}`,
-      to: c.to.kind === "suggestion" ? `s:${c.to.id}` : `a:${c.to.id}`,
-      style: c.relation === "suggested_continuation" ? ("continuation" as const) : ("destination" as const),
-      connectionId: c.id,
-    })),
-  ];
-  const edgeKey = JSON.stringify(edges);
+  const reuse = (c: ConnectionSuggestion) => connectionState(c, bp).carry.length;
+  const key = JSON.stringify(connections.map((c) => [c.id, c.fromSuggestionId, c.to.id, c.to.kind]));
 
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
     const measure = () => {
+      if (window.innerWidth < 1024) return setLines([]);
       const root = el.getBoundingClientRect();
-      const rect = (key: string) => el.querySelector(`[data-node="${key}"]`)?.getBoundingClientRect();
+      const r = (k: string) => el.querySelector(`[data-node="${k}"]`)?.getBoundingClientRect();
       const out: Line[] = [];
-      for (const e of JSON.parse(edgeKey) as Edge[]) {
-        const a = rect(e.from), b = rect(e.to);
+      for (const c of connections) {
+        const a = r(`s:${c.fromSuggestionId}`);
+        const b = r(c.to.kind === "suggestion" ? `s:${c.to.id}` : `a:${c.to.id}`);
         if (!a || !b) continue;
-        if (e.style === "continuation") {
-          // same column: arc on the right side
-          const x = a.right - root.left, y1 = a.top + a.height / 2 - root.top, y2 = b.top + b.height / 2 - root.top;
-          out.push({ ...e, d: `M${x},${y1} C${x + 48},${y1} ${x + 48},${y2} ${x},${y2}` });
+        if (c.to.kind === "suggestion") {
+          const x = a.left - root.left, y1 = a.top + a.height / 2 - root.top, y2 = b.top + b.height / 2 - root.top;
+          const bend = 56;
+          out.push({ id: c.id, kind: "bridge", d: `M${x},${y1} C${x - bend},${y1} ${x - bend},${y2} ${x},${y2}`, mid: { x: x - bend * 0.75, y: (y1 + y2) / 2 }, label: reuse(c) ? `reuses ${reuse(c)}` : undefined });
         } else {
-          const x1 = a.right - root.left, y1 = a.top + a.height / 2 - root.top;
-          const x2 = b.left - root.left, y2 = b.top + b.height / 2 - root.top;
+          const x1 = a.right - root.left, y1 = a.top + a.height / 2 - root.top, x2 = b.left - root.left, y2 = b.top + b.height / 2 - root.top;
           const mx = (x1 + x2) / 2;
-          out.push({ ...e, d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` });
+          out.push({ id: c.id, kind: "handover", d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` });
         }
       }
       setLines(out);
@@ -70,86 +62,76 @@ export function ConnectionMap() {
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [edgeKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 
-  if (visible.length === 0) return null;
+  if (!visible.length) return <p className="rounded-2xl border border-line bg-paper p-6 text-ink-soft">No experiences to connect — everything was set aside.</p>;
 
   return (
-    <section aria-labelledby="conn-title">
-      <SectionHeading id="connections" eyebrow="Planning only — nothing is connected yet" title="How it could work together" />
-      <div className="rounded-2xl border border-line bg-paper p-6 sm:p-8">
-        <div ref={box} className="relative grid gap-6 lg:grid-cols-[1fr_1.3fr_1fr] lg:gap-20">
+    <section aria-label="How they work together" className="space-y-5">
+      <ul className="flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-ink-soft">
+        <li className="flex items-center gap-1.5"><MapPin className="size-4 text-sky" aria-hidden /> <b className="font-medium text-ink">Appears on</b> — pages where an experience starts</li>
+        <li className="flex items-center gap-1.5"><svg width="26" height="8" aria-hidden><path d="M0,4 H26" stroke="#1d7a4f" strokeWidth="2" strokeDasharray="5 4" /></svg> <b className="font-medium text-ink">Bridge</b> — visitors can move on to the next experience</li>
+        <li className="flex items-center gap-1.5"><RefreshCw className="size-4 text-go" aria-hidden /> <b className="font-medium text-ink">Reuses answers</b> — nobody is asked twice</li>
+        <li className="flex items-center gap-1.5"><Lock className="size-4 text-ink" aria-hidden /> <b className="font-medium text-ink">Your process</b> — stays exactly as it is</li>
+      </ul>
+
+      <div className="rounded-2xl border border-line bg-paper p-5 sm:p-7">
+        <div ref={box} className="relative grid gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:gap-28 lg:pl-16">
           <svg className="pointer-events-none absolute inset-0 hidden size-full overflow-visible lg:block" aria-hidden>
-            <defs>
-              <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor" /></marker>
-            </defs>
-            {lines.map((l, i) => (
-              <path
-                key={i}
-                d={l.d}
-                fill="none"
-                markerEnd={l.style === "page" ? undefined : "url(#arrow)"}
-                className={
-                  l.style === "page" ? "text-line" : l.style === "continuation" ? "text-go" : "text-ink-soft"
-                }
-                stroke="currentColor"
-                strokeWidth={l.connectionId && l.connectionId === active ? 3 : l.style === "page" ? 1.5 : 2}
-                strokeDasharray={l.style === "continuation" ? "6 5" : undefined}
-              />
+            <defs><marker id="cm-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor" /></marker></defs>
+            {lines.map((l) => (
+              <path key={l.id} d={l.d} fill="none" markerEnd="url(#cm-arrow)" stroke="currentColor"
+                className={l.kind === "bridge" ? "text-go" : "text-ink-soft"} strokeWidth={active === l.id ? 3 : 2} strokeDasharray={l.kind === "bridge" ? "6 5" : undefined} />
             ))}
           </svg>
-
-          <Column title="Your pages">
-            {pageIds.map((p) => (
-              <div key={p} data-node={`p:${p}`} className="rounded-lg border border-line bg-canvas/60 px-3 py-2 text-[13px] font-medium">{page(p)?.title}</div>
-            ))}
-            {morePages > 0 && <p className="px-1 text-[12px] text-ink-mute">+ {morePages} more page{morePages > 1 ? "s" : ""}</p>}
-          </Column>
-          <Column title="Suggested experiences">
-            {visible.map((s) => (
-              <div key={s.id} data-node={`s:${s.id}`} className="rounded-xl border border-go/30 bg-go-soft/40 px-4 py-3">
-                <p className="text-[15px] font-semibold">{s.label}</p>
-                <p className="text-[12px] text-ink-mute">{s.pageContexts.length > 1 ? `Same experience on ${s.pageContexts.length} pages` : "On 1 page"}</p>
-              </div>
-            ))}
-          </Column>
-          <Column title="Already on your website">
-            {destIds.map((a) => (
-              <div key={a} data-node={`a:${a}`} className="rounded-xl border border-ink/15 bg-paper px-4 py-3 shadow-sm">
-                <p className="text-[15px] font-semibold">{asset(a)?.label}</p>
-                <p className="text-[12px] text-ink-mute">Stays exactly as it is</p>
-              </div>
-            ))}
-          </Column>
-        </div>
-
-        <div className="mt-6 hidden flex-wrap gap-5 border-t border-line pt-4 text-[12px] text-ink-mute lg:flex">
-          <span className="flex items-center gap-2"><svg width="28" height="6" aria-hidden><path d="M0,3 H28" stroke="#e6e3dc" strokeWidth="2" /></svg> Touchpoint — where an experience appears</span>
-          <span className="flex items-center gap-2"><svg width="28" height="6" aria-hidden><path d="M0,3 H28" stroke="#1d7a4f" strokeWidth="2" strokeDasharray="6 5" /></svg> Suggested bridge — hand-over between experiences</span>
-          <span className="flex items-center gap-2"><svg width="28" height="6" aria-hidden><path d="M0,3 H28" stroke="#46535b" strokeWidth="2" /></svg> Hand-over to your existing process</span>
-        </div>
-
-        <p className="mt-5 rounded-xl bg-canvas px-4 py-3 text-[13px] text-ink-soft">
-          <span className="font-semibold text-ink">Project information (ProjectState)</span> — what a visitor already told one experience could later be reused by the next, so nobody is asked twice.
-          This is separate from where an experience appears and from bridges. Shown here as a plan only.
-        </p>
-
-        <ul className="mt-4 grid gap-3 md:grid-cols-2">
-          {connections.map((c) => (
-            <ConnectionCard key={c.id} c={c} active={active === c.id} onFocus={() => setActive(c.id)} onBlur={() => setActive(null)} />
+          {lines.filter((l) => l.mid && l.label).map((l) => (
+            <span key={`p-${l.id}`} style={{ left: l.mid!.x, top: l.mid!.y }} className="absolute z-10 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full bg-go px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-white shadow lg:inline-flex">
+              <RefreshCw className="size-3" aria-hidden /> {l.label}
+            </span>
           ))}
+
+          <div className="space-y-3">
+            <p className="text-[12px] font-medium text-ink-mute">Suggested experiences</p>
+            {visible.map((s) => {
+              const i = bp.suggestedExperiences.indexOf(s);
+              const pr = priorityOf(i, s);
+              return (
+                <div key={s.id} data-node={`s:${s.id}`} className="rounded-xl border border-go/30 bg-go-soft/40 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-[15px] font-semibold">{s.label}</p>
+                    <Chip tone={pr.tone} className="!text-[11px]">{pr.label}</Chip>
+                  </div>
+                  <p className="mt-1.5 flex flex-wrap items-center gap-1 text-[12px]">
+                    <MapPin className="size-3.5 text-sky" aria-label="Appears on" />
+                    {s.pageContexts.slice(0, 3).map((c) => <span key={c.pageId} className="rounded bg-paper px-1.5 py-0.5 text-ink-soft ring-1 ring-line">{page(c.pageId)?.title}</span>)}
+                    {s.pageContexts.length > 3 && <span className="text-ink-mute">+{s.pageContexts.length - 3}</span>}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-col justify-center space-y-3">
+            <p className="text-[12px] font-medium text-ink-mute">Your process</p>
+            {destIds.map((a) => (
+              <div key={a} data-node={`a:${a}`} className="rounded-xl bg-ink px-4 py-3 text-white shadow-sm">
+                <p className="flex items-center gap-2 text-[15px] font-semibold"><Lock className="size-4 opacity-70" aria-hidden /> {asset(a)?.label}</p>
+                <p className="mt-0.5 text-[12px] text-white/70">Stays exactly as it is</p>
+              </div>
+            ))}
+            {!destIds.length && <p className="text-[13px] text-ink-mute">No hand-over to an existing form or booking found.</p>}
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p className="mb-2 text-[13px] font-medium text-ink-mute">Each connection · a plan, nothing is connected</p>
+        <ul className="grid gap-3 md:grid-cols-2">
+          {connections.map((c) => <ConnectionCard key={c.id} c={c} active={active === c.id} onFocus={() => setActive(c.id)} onBlur={() => setActive(null)} />)}
         </ul>
       </div>
     </section>
-  );
-}
-
-function Column({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="relative flex flex-col justify-center gap-3">
-      <p className="text-[12px] font-medium text-ink-mute">{title}</p>
-      {children}
-    </div>
   );
 }
 
@@ -161,52 +143,43 @@ function ConnectionCard({ c, active, onFocus, onBlur }: { c: ConnectionSuggestio
   const to = c.to.kind === "suggestion" ? suggestion(c.to.id)?.label : asset(c.to.id)?.label;
   const [adjusting, setAdjusting] = useState(false);
   const [note, setNote] = useState(d?.edits?.note ?? "");
+  const M = mech[st.mechanism];
 
   return (
-    <li
-      onMouseEnter={onFocus}
-      onMouseLeave={onBlur}
-      onFocus={onFocus}
-      onBlur={onBlur}
-      className={`rounded-xl border p-4 transition-colors ${active ? "border-go/50 bg-go-soft/20" : "border-line"} ${d?.status === "rejected" ? "opacity-60" : ""}`}
-      data-testid={`connection-${c.id}`}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <Chip tone={mechanismInfo[st.mechanism].tone}>{mechanismInfo[st.mechanism].label}</Chip>
-        <Chip className="ml-auto"><Link2Off className="size-3" aria-hidden /> Not connected yet</Chip>
+    <li onMouseEnter={onFocus} onMouseLeave={onBlur} onFocus={onFocus} onBlur={onBlur} data-testid={`connection-${c.id}`}
+      className={`rounded-xl border bg-paper p-4 transition-colors ${active ? "border-go/50" : "border-line"} ${d?.status === "rejected" ? "opacity-60" : ""}`}>
+      <div className="flex items-center gap-2 text-[12px] text-ink-mute">
+        <M.Icon className={`size-4 ${st.mechanism === "bridge" ? "text-go" : "text-ink"}`} aria-hidden />
+        <span className="font-medium text-ink-soft">{M.label}</span>
+        <span className="ml-auto inline-flex items-center gap-1"><Link2Off className="size-3" aria-hidden /> not connected yet</span>
       </div>
-      <p className="mt-2 text-[14px] font-semibold">{from} → {to}</p>
-      <p className="mt-0.5 text-[12px] text-ink-mute">{mechanismInfo[st.mechanism].explain}</p>
-      <p className="mt-2 text-[14px] text-ink-soft">{c.rationale}</p>
+      <p className="mt-1.5 text-[15px] font-semibold">{from} <span className="text-ink-mute">→</span> {to}</p>
+      <p className="mt-1 line-clamp-2 text-[13px] text-ink-soft">{c.rationale}</p>
+
       {(st.carry.length > 0 || st.missing.length > 0) && (
-        <div className="mt-3 grid gap-2 rounded-lg bg-canvas/70 p-3 text-[13px] sm:grid-cols-2">
-          <div>
-            <p className="text-[11px] font-semibold tracking-wide text-ink-mute uppercase">Could carry forward</p>
-            {st.carry.length ? (
-              <ul className="mt-1 space-y-0.5">{st.carry.map((x) => <li key={x.label}>{x.label}{x.note && <span className="text-ink-mute"> · {x.note}</span>}</li>)}</ul>
-            ) : <p className="mt-1 text-ink-mute">Nothing yet</p>}
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold tracking-wide text-ink-mute uppercase">Still to ask</p>
-            {st.missing.length ? <ul className="mt-1 space-y-0.5">{st.missing.map((x) => <li key={x}>{x}</li>)}</ul> : <p className="mt-1 text-ink-mute">—</p>}
-          </div>
+        <div className="mt-3 flex flex-wrap gap-1.5 text-[12px]">
+          {st.carry.map((x) => (
+            <span key={`c-${x.label}`} title={x.note ? `Reused as a ${x.note}` : "Could be reused — not asked again"} className="inline-flex items-center gap-1 rounded-full bg-go-soft px-2 py-0.5 text-go-ink">
+              <Check className="size-3" aria-hidden /> {x.label}{x.note ? " (preference)" : ""}
+            </span>
+          ))}
+          {st.missing.map((x) => (
+            <span key={`m-${x}`} title="Still to ask" className="inline-flex items-center gap-1 rounded-full bg-canvas px-2 py-0.5 text-ink-soft ring-1 ring-line">
+              <CircleHelp className="size-3" aria-hidden /> {x}
+            </span>
+          ))}
         </div>
       )}
       {st.constraints.length > 0 && (
-        <ul className="mt-2 space-y-0.5 text-[12px] text-amber">{st.constraints.map((x) => <li key={x}>• {x}</li>)}</ul>
+        <ul className="mt-2 space-y-0.5">
+          {st.constraints.map((x) => <li key={x} className="flex items-start gap-1.5 text-[12px] text-amber"><Info className="mt-0.5 size-3 shrink-0" aria-hidden />{x}</li>)}
+        </ul>
       )}
-      {d?.status === "edited" && d.edits?.note && <p className="mt-2 rounded-lg bg-canvas px-3 py-2 text-[13px]">Your note: {d.edits.note}</p>}
+      {d?.status === "edited" && d.edits?.note && <p className="mt-2 rounded-lg bg-canvas px-3 py-1.5 text-[12px]">Your note: {d.edits.note}</p>}
       {adjusting ? (
-        <form
-          className="mt-3 flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            decide({ targetKind: "connection", targetId: c.id, status: note.trim() ? "edited" : "confirmed", edits: note.trim() ? { note: note.trim() } : undefined });
-            setAdjusting(false);
-          }}
-        >
+        <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); decide({ targetKind: "connection", targetId: c.id, status: note.trim() ? "edited" : "confirmed", edits: note.trim() ? { note: note.trim() } : undefined }); setAdjusting(false); }}>
           <input autoFocus value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="What should be different?" aria-label="Adjustment note"
-            className="w-full rounded-lg border border-line px-3 py-1.5 text-[14px] outline-none focus:border-go" />
+            className="w-full rounded-lg border border-line px-3 py-1.5 text-[13px] outline-none focus:border-go" />
           <Button type="submit" size="sm" variant="primary">Save</Button>
         </form>
       ) : (

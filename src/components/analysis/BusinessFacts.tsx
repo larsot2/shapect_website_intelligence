@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Pencil, Quote, RotateCcw, X } from "lucide-react";
+import { Check, Eye, Pencil, Quote, RotateCcw, X } from "lucide-react";
 import type { BusinessClaim, Service } from "@/lib/blueprint/schema";
 import { Button, Chip, SectionHeading } from "@/components/ui";
 import { useAnalysis } from "./AnalysisContext";
@@ -84,7 +84,12 @@ function ClaimRow({ c }: { c: BusinessClaim }) {
     <li className="p-5" data-testid={`claim-${c.id}`}>
       <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
         <div className="min-w-0 flex-1">
-          <p className="text-[12px] text-ink-mute">{c.label}</p>
+          <p className="flex flex-wrap items-center gap-2 text-[12px] text-ink-mute">
+            {c.label}
+            {c.status === "observed"
+              ? <span className="inline-flex items-center gap-1 rounded-full bg-go-soft px-1.5 py-px text-[11px] text-go-ink" title="Stated on your website"><Eye className="size-3" aria-hidden />we know</span>
+              : <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-ink-mute/50 px-1.5 py-px text-[11px]" title="Our interpretation of your website">we infer</span>}
+          </p>
           {editing ? (
             <form
               className="mt-1 flex gap-2"

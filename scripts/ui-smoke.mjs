@@ -37,13 +37,15 @@ try {
   await page.getByRole("link", { name: /Northwind Bathrooms/ }).click();
   await page.waitForURL(/fixture-northwind$/);
   assert(await page.getByText("Demo fixture").first().isVisible(), "fixture is clearly labelled");
-  assert(await page.getByRole("heading", { name: "What we recommend" }).isVisible(), "recommendations section");
+  assert(await visible(page.getByRole("heading", { name: /What we recommend — at a glance/ })), "overview with recommendations at a glance");
   await shot(page, "01-results");
+  await page.getByRole("tab", { name: /Recommended experiences/ }).click();
+  assert(await visible(page.getByRole("heading", { name: "Recommended experiences" })), "recommendations tab");
 
   const planner = page.getByTestId("card-sx-project-planner");
   assert(await planner.getByText("Proposed experience").isVisible(), "recommendation shows a proposed experience flow");
   await planner.getByRole("button", { name: "See why" }).click();
-  assert(await page.getByRole("dialog").getByText("Seen on your website").isVisible(), "why panel shows evidence");
+  assert(await page.getByRole("dialog").getByRole("heading", { name: /What we know/ }).isVisible(), "why panel separates what we know");
   await shot(page, "02-why");
   await page.keyboard.press("Escape");
 
@@ -59,17 +61,18 @@ try {
   await style.getByRole("button", { name: "Not for us" }).click();
   assert(await style.getByText("marked as not for you").isVisible(), "reject collapses card");
 
-  await page.getByRole("button", { name: /Is this right about your business/ }).click();
+  await page.getByRole("tab", { name: /What we learned/ }).click();
   await page.getByTestId("claim-c-region").getByRole("button", { name: "Confirm" }).click();
+  await page.getByRole("tab", { name: /How they work together/ }).click();
   await page.getByTestId("connection-cn-planner-to-form").getByRole("button", { name: "Keep" }).click();
   assert(await page.getByTestId("connection-cn-planner-to-form").getByText("Kept in plan").isVisible(), "connection kept (concept only)");
   await page.getByTestId("connection-cn-planner-to-form").scrollIntoViewIfNeeded();
   await shot(page, "04-connections");
 
-  await page.reload();
+  await page.goto(`${BASE}/studio/website/fixture-northwind?view=recommendations`);
   assert(await visible(page.getByTestId("card-sx-project-planner").getByText("Confirmed with your edits")), "decision survives reload");
   assert(await visible(page.getByTestId("card-sx-style-explorer").getByText("marked as not for you")), "rejection survives reload");
-  await page.getByRole("button", { name: /Is this right about your business/ }).click();
+  await page.goto(`${BASE}/studio/website/fixture-northwind?view=verify`);
   assert(await visible(page.getByTestId("claim-c-region").getByText("Confirmed by you")), "claim decision survives reload");
 
   await page.goto(`${BASE}/studio/website/fixture-northwind/preview?page=small&marker=tp-small-midpage`);
@@ -86,7 +89,7 @@ try {
   const real = scans.find((x) => x.status === "done");
   if (real) {
     await page.goto(`${BASE}/studio/website/${real.scanId}`);
-    assert(await page.getByRole("heading", { name: "What we recommend" }).isVisible(), `real scan renders (${real.businessName})`);
+    assert(await visible(page.getByRole("tab", { name: /Recommended experiences/ })), `real scan renders (${real.businessName})`);
     await page.goto(`${BASE}/studio/website/${real.scanId}/preview`);
     assert(await page.locator("img[alt^='Screenshot of']").first().isVisible(), "real screenshot shown in preview");
     await shot(page, "09-real-preview");
@@ -98,7 +101,7 @@ try {
   const m = await browser.newContext({ ...devices["iPhone 13"] });
   const mp = await m.newPage();
   await mp.goto(`${BASE}/studio/website/fixture-northwind`);
-  assert(await mp.getByRole("heading", { name: "What we recommend" }).isVisible(), "results render on mobile");
+  assert(await visible(mp.getByRole("heading", { name: /What we recommend — at a glance/ })), "results render on mobile");
   const overflow = await mp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert(overflow <= 1, `no horizontal scroll on mobile (overflow ${overflow}px)`);
   await shot(mp, "07-mobile-results");
