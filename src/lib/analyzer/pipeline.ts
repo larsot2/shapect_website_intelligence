@@ -236,7 +236,7 @@ function addTopicStubs(u: Understanding, pages: SitePage[]): Understanding {
 }
 
 /** Service/design pages the context matrix doesn't account for (context fidelity input). */
-function unmappedPages(u: Understanding, pages: SitePage[]): string[] {
+export function unmappedPages(u: Understanding, pages: SitePage[]): string[] {
   const mapped = new Set(u.contexts.flatMap((x) => x.sourcePageIds));
   return pages.filter((p) => ["service", "design", "commercial"].includes(p.group) && !mapped.has(p.id)).map((p) => p.id);
 }
@@ -469,14 +469,14 @@ function humanError(e: Error): string {
   return `The analysis stopped: ${m.slice(0, 160)}`;
 }
 
-function sectionsText(captures: PageCapture[], pages: SitePage[]): string {
+export function sectionsText(captures: PageCapture[], pages: SitePage[]): string {
   return captures.filter((c) => c.sections.length).map((c) => {
     const p = pages.find((x) => x.id === c.pageId);
     return `${c.pageId} (${p?.path}): ${c.sections.slice(0, 10).map((s) => `${s.id}=“${s.heading.slice(0, 50)}”`).join(", ")}`;
   }).join("\n");
 }
 
-function gateFacts(assets: InvAsset[], u: Understanding, pages: SitePage[]): string[] {
+export function gateFacts(assets: InvAsset[], u: Understanding, pages: SitePage[]): string[] {
   const facts: string[] = [];
   const calc = assets.filter((a) => a.kind === "calculator" || u.assets.some((x) => x.assetId === a.id && x.isRealCalculator));
   facts.push(calc.length ? `A real calculator exists (${calc.map((c) => c.id).join(", ")}): never add another estimator; you may improve the path around it.` : "No working calculator on the site (price articles are not calculators). Shapect may only show the business's published references, never calculate.");
