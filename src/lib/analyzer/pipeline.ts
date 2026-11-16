@@ -20,6 +20,7 @@ import type { PageCapture } from "./capture";
 import { applyEntryGates, contextFidelity } from "./gates";
 import { buildEvidence, type EvidenceItem } from "./evidence";
 import { checkContent } from "./content-check";
+import { ground } from "./grounding";
 import { FIELD_CATALOG } from "./fields";
 import { SUPPORTED_SCOPE_RE, UNSUPPORTED_SCOPE_RE } from "./capabilities";
 import { networkMode, newFetchStats } from "./net/fetcher";
@@ -179,6 +180,26 @@ export function normaliseContexts(u: Understanding, pages?: SitePage[]): Underst
   };
 }
 
+/** Every fact, constraint and content object keeps only evidence that supports it (re-anchored if mis-cited). */
+export function groundUnderstanding(u: Understanding, evidence: EvidenceItem[]): Understanding {
+  return {
+    ...u,
+    facts: u.facts.map((f) => {
+      const g = ground(`${f.label} ${f.value}`, f.evidenceIds, evidence, { commercial: f.topic === "segment" || /commercial/i.test(`${f.label} ${f.value}`) });
+      return { ...f, evidenceIds: g.ids, status: g.ids.length ? f.status : "inferred" };
+    }),
+    contexts: u.contexts.map((x) => {
+      const commercial = x.support === "unsupported" && /commercial/i.test(`${x.label} ${x.id}`);
+      return {
+        ...x,
+        specificConstraints: x.specificConstraints.map((k) => { const g = ground(k.text, k.evidenceIds, evidence, { commercial }); return { ...k, evidenceIds: g.ids, status: g.ids.length ? k.status : "to_confirm" }; }),
+        evidenceIds: ground(`${x.label} ${x.customerIntent ?? ""} ${x.unresolvedDecisions.join(" ")}`, x.evidenceIds, evidence, { commercial, max: 4 }).ids,
+      };
+    }),
+    contentAssets: u.contentAssets.map((a) => ({ ...a, evidenceIds: ground(`${a.label} ${a.whatItShows}`, a.evidenceIds, evidence).ids })),
+  };
+}
+
 /** Contexts that are only suburb/SEO pages or project case studies are not customer contexts. */
 function dropNonContexts(u: Understanding, pages: SitePage[], clusterKeys: Set<string> = new Set()): Understanding {
   // members of page families (suburb variants, project pages) are examples/geography, not contexts
@@ -237,7 +258,7 @@ export async function analyze(c: Collected, o: AnalyzeOptions): Promise<{ bluepr
         prompt: buildUnderstandingPrompt(c, evidence),
       });
       const clusterKeys = new Set(c.clusters.flatMap((x) => x.members.map((m) => dedupeKey(m))));
-      understanding = addTopicStubs(dropNonContexts(normaliseContexts(understanding, c.pages), c.pages, clusterKeys), c.pages);
+      understanding = groundUnderstanding(addTopicStubs(dropNonContexts(normaliseContexts(understanding, c.pages), c.pages, clusterKeys), c.pages), evidence);
       // targeted follow-up: read only what was asked for, send only the delta
       const wanted = understanding.followUpRequests.map((n) => c.followUps.find((f) => f.id === n.id)?.url).filter(Boolean) as string[];
       const room = config.deepPagesMax - c.pages.length;
@@ -254,7 +275,7 @@ export async function analyze(c: Collected, o: AnalyzeOptions): Promise<{ bluepr
               stage: "understanding", task: "understanding-delta", schema: UnderstandingDeltaSchema, schemaVersion: SCHEMA_VERSION_LLM, usage: o.usage, promptVersion: PROMPT_VERSION, onWait: busy, maxOutputTokens: 4000,
               prompt: buildDeltaPrompt(c, added, newEv, understanding),
             });
-            understanding = addTopicStubs(dropNonContexts(normaliseContexts(mergeDelta(understanding, delta), c.pages), c.pages, clusterKeys), c.pages);
+            understanding = groundUnderstanding(addTopicStubs(dropNonContexts(normaliseContexts(mergeDelta(understanding, delta), c.pages), c.pages, clusterKeys), c.pages), evidence);
           } catch (e) {
             o.warnings.push(`Follow-up reading couldn't be analysed (${(e as Error).message}).`);
           }
@@ -335,19 +356,11 @@ export async function analyze(c: Collected, o: AnalyzeOptions): Promise<{ bluepr
     if (!q.basis) continue;
     const ids = q.basis.match(/\bE\d{1,4}\b/g) ?? [];
     if (!ids.length) continue;
-    const qs = stems(`${q.question} ${q.options?.join(" ") ?? ""} ${FIELD_CATALOG[q.fieldKey]?.label ?? ""}`);
-    const relevant = ids.filter((id) => {
-      const ev = evidence.find((e) => e.id === id);
-      if (!ev) return false;
-      const pg = c.pages.find((p) => p.id === ev.pageId);
-      if (pg && (pg.group === "commercial" || /commercial/.test(pg.path)) && !/commercial/i.test(`${sx.label} ${q.question}`)) return false;
-      return [...stems(ev.text)].some((w) => qs.has(w));
-    });
-    if (!relevant.length) q.basis = undefined;
-    else for (const id of ids) if (!relevant.includes(id)) q.basis = q.basis.replace(id, "").replace(/\s{2,}/g, " ").trim();
+    const g = ground(`${q.question} ${q.options?.join(" ") ?? ""} ${FIELD_CATALOG[q.fieldKey]?.label ?? ""}`, ids, evidence, { commercial: /commercial/i.test(`${sx.label} ${q.question}`), max: 1 });
+    q.basis = g.ids.length ? g.ids[0] : undefined;
   }
   for (const sx of raw.suggestedExperiences) for (const q of sx.questionPlan) {
-    if (q.basis) q.basis = q.basis.replace(/\bE\d{1,4}\b/g, (id) => { const t = evidence.find((e) => e.id === id)?.text; return t ? `“${t.length > 70 ? t.slice(0, 69) + "…" : t}”` : id; });
+    if (q.basis) q.basis = q.basis.replace(/\bE\d{1,4}\b/g, (id) => { const t = evidence.find((e) => e.id === id)?.text; return t ? `“${t.length > 100 ? t.slice(0, 99) + "…" : t}”` : id; }).slice(0, 140);
     const fr = raw.frictions.find((f) => f.id === q.basis);
     if (fr) q.basis = `Friction: ${fr.visitorQuestion}`;
   }
@@ -644,6 +657,7 @@ function assemble(a: AssembleArgs): Blueprint {
   // frictions: "observed" only if every cited id resolves to real page text
   const ctxIds = new Set((u?.contexts ?? []).map((x) => x.id));
   const frictions: Blueprint["frictions"] = (strategy?.diagnosis ?? []).map((f) => {
+    f = { ...f, evidenceIds: ground(`${f.visitorQuestion} ${f.whyHardHere}`, f.evidenceIds, a.evidence, { commercial: /commercial/i.test(f.visitorQuestion), max: 4 }).ids };
     const ev = toEvidence(f.evidenceIds);
     return {
       id: f.id, visitorQuestion: clip(f.visitorQuestion, 180), whyHardHere: clip(f.whyHardHere, 260), consequence: f.consequence,
@@ -724,14 +738,7 @@ function assemble(a: AssembleArgs): Blueprint {
         // entry evidence must relate to what the entry claims (a commercial page doesn't support a residential price tier)
         const claim = stems(`${e.label} ${e.headline} ${e.promise ?? ""} ${e.motivation ?? ""} ${e.specificToBusiness ?? ""} ${e.coverageGap} ${e.currentState} ${e.questionPlan.map((x) => x.question).join(" ")} ${e.contextVariants.map((v) => v.startingHook).join(" ")}`);
         const entryIsCommercial = /commercial/i.test(`${e.label} ${e.headline}`);
-        const related = e.evidenceIds.filter((id) => {
-          const ev = evById.get(id);
-          if (!ev) return false;
-          // page-level: evidence from a commercial page can't support a residential idea (and vice versa)
-          const pg = pageById.get(ev.pageId);
-          if (pg && (pg.group === "commercial" || /commercial/.test(pg.path)) !== entryIsCommercial) return false;
-          return [...stems(ev.text)].filter((w) => claim.has(w)).length >= 2;
-        });
+        const related = ground([...claim].join(" ") + ` ${e.label} ${e.headline} ${e.promise ?? ""} ${e.specificToBusiness ?? ""}`, e.evidenceIds, a.evidence, { commercial: entryIsCommercial, max: 4 }).ids;
         return related.length
           ? { evidence: toEvidence(related) }
           : { evidence: toEvidence(e.evidenceIds), riskFlags: [...e.riskFlags.map((x) => clip(x, 200)), "The cited website evidence only loosely supports this idea — check before relying on it."].slice(0, 5) };

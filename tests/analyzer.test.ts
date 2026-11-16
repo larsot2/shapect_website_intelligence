@@ -196,3 +196,20 @@ describe("mechanical content checks", () => {
     expect(r.removed.length).toBe(2);
   });
 });
+
+describe("deterministic evidence grounding", () => {
+  it("drops mis-cited evidence and re-anchors to the line that supports the claim", async () => {
+    const { ground } = await import("@/lib/analyzer/grounding");
+    const ev = [
+      { id: "E1", pageId: "commercial-bathroom-renovations", type: "service_offering", text: "We renovate bathrooms for offices, restaurants and retail spaces." },
+      { id: "E2", pageId: "small-bathroom-renovations", type: "pricing_reference", text: "Small bathroom renovations: Budget $12k–$18k, Mid-range $18k–$25k, Luxury $25k+." },
+      { id: "E3", pageId: "faqs", type: "process_step", text: "We measure on site before giving a fixed-price quote." },
+    ] as never;
+    // the model cited the commercial line for a residential price tier
+    expect(ground("Small bathroom budget tier $12k–$18k", ["E1"], ev).ids).toEqual(["E2"]);
+    // a fitting citation is kept
+    expect(ground("Fixed-price quote after an on-site measure", ["E3"], ev).ids).toEqual(["E3"]);
+    // nothing fits → no evidence (the claim becomes inferred)
+    expect(ground("Free 3D design renders", ["E1"], ev).ids).toEqual([]);
+  });
+});

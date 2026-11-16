@@ -203,7 +203,7 @@ export const QuestionSchema = z.object({
   /** why ask it before the consultation: changes the path, sets an expectation, prepares the quote, or checks fit */
   purpose: z.enum(["route", "expectation", "prepare", "qualify"]).optional(),
   /** the business fact or friction the question comes from */
-  basis: z.string().max(140).optional(),
+  basis: z.string().max(200).optional(),
 });
 
 export const ContextInsightSchema = z.object({
