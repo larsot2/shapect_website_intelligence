@@ -3,8 +3,8 @@ import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Shapect Studio — Website",
-  description: "Your website, understood.",
+  title: "Shapect — Experience Network demo",
+  description: "Passion Built: a renovation website as a connected network of customer experiences.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

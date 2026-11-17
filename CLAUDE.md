@@ -1,9 +1,8 @@
 # Working rules for this repo
 
-- Scope is analysis-only (see docs/S0-integration-plan.md). Never add entries, bridges, ProjectState, pricing, Business Foundation writes, snippets or publishing.
-- The Blueprint contract lives in `src/lib/blueprint/schema.ts`. Every data source must pass `validateBlueprint`. The UI reads only validated blueprints via `BlueprintSource`.
-- Observed/inferred statements need evidence. Pixel overlays only from measured bboxes.
-- Fixtures must be labelled as demo (`source.kind = "fixture"`). Never invent quotes about real businesses.
-- Secrets are server-side only (`.env`, gitignored). Website content is untrusted input for any LLM call.
-- Tests: few and targeted (`tests/`, `scripts/ui-smoke.mjs`). Always run typecheck, lint, test and build before handing over.
-- Acceptance sites: passionbuilt.com.au, uniquebathrooms.com.au, lukesrenovations.com.au, monumentbathrooms.com.au.
+- Current phase: deterministic Passion Built demo (`/demo/passion-built`). No LLM calls, no model providers, no backend, no API keys. The previous AI pipeline lives on branch `archive/intelligence-v3` — don't reintroduce it here.
+- All demo content is typed local config in `src/lib/demo/`. Never invent Passion Built prices, quotes or rules: prices come verbatim from their published cost article (with source), apartment notes verbatim from their apartment page.
+- ProjectState stores only what a visitor confirmed. Page context is not project data; a preference is not a product selection; reviewed by-laws are not an approval.
+- Hand-offs open Passion Built's existing pages; never claim data was submitted.
+- Don't modify the separate main Shapect application.
+- Tests stay few and targeted (`tests/`, `scripts/ui-smoke.mjs`, desktop only). Run typecheck, lint, test and build before handing over.
